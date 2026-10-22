@@ -164,7 +164,9 @@ std::vector<EncodedPage> encodePages(const std::string &path,int columns,int ful
  SuperDataBlock super{};
  super.address=0xffffffffu;
  super.dataSize=encrypted ? storedLength : uint32_t(padded.size());
- super.pageSize=super.dataSize;
+ // Windows PaperBak expects the nominal data capacity of ONE full page here.
+ // It derives the expected page count as ceil(dataSize / pageSize).
+ super.pageSize=uint32_t(uint64_t(perPageCapacity)*R*90);
  super.originalSize=nativeCompressed ? originalSize : uint32_t(std::filesystem::file_size(path));
  super.fileCrc=encrypted ? plaintextCRC : Crc16(padded.data(),int(padded.size()));
  if (encrypted) super.mode |= kEncrypted;
