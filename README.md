@@ -1,17 +1,20 @@
-# PaperBack 2.0 for macOS
+PaperBack is a native macOS application for encoding files as printable PaperBak backup images and restoring files from PNG or BMP backup images. Uses the source code from Oleh Yuschuk's **PaperBack** (https://www.ollydbg.de/Paperbak/index.html).
 
-PaperBack is a native macOS application for encoding files as printable PaperBak backup images and restoring files from PNG or BMP backup images.
+## New Features:
+• Improved interface focusing on generating backups with ease and with more user controls
+• Encode files as PaperBak-compatible PNG backup images
+• Decode PNG and BMP backup images
+• Single-page and multi-page backup layout options
+• Paper size-based or manually selected columns and rows
+• Recovery-block configuration
+• Password-protected backups compatible with the original PaperBak encryption format
+• Added 7zip compression
 
-Based on **Oleh Yuschuk's PaperBack**, [original PaperBak website](https://www.ollydbg.de/Paperbak/index.html). Ported to macOS by **Mike Buffington**.
+## Requirements: macOS 26 or later
 
-## Features
+Important: PaperBack is not currently signed with an Apple Developer ID or notarized by Apple. If macOS blocks the app, open System Settings → Privacy & Security, scroll to the Security section, and select Open Anyway after attempting to launch it. Confirm that you trust the download before proceeding.
 
-- Encode files as PaperBak-compatible PNG backup images
-- Decode supported PNG and BMP backup images
-- Single-page and multi-page backup layouts
-- Paper-based or manually selected columns and rows
-- Recovery-block configuration
-- Password-protected backups compatible with the original PaperBak encryption format
+PaperBack is provided as-is. Please report any problems through GitHub Issues.
 
 ## Build on macOS
 
@@ -23,10 +26,6 @@ open xcode/PaperBack.xcodeproj
 ```
 
 In Xcode, choose the **PaperBack** scheme, destination **My Mac**, then **Product → Build**. Locate `PaperBack.app` in Xcode's **Products** group using **Show in Finder**. Copy the application to `/Applications` to install it.
-
-## Downloading the app
-
-Download the macOS application ZIP from the repository's **Releases** page.
 
 ## Compatibility and security
 
