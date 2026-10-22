@@ -13,7 +13,7 @@ PaperBack is a native macOS application for encoding files as printable PaperBak
 
 ## Requirements: macOS 26 or later
 
-Important: PaperBack is not currently signed with an Apple Developer ID or notarized by Apple. If macOS blocks the app, open System Settings → Privacy & Security, scroll to the Security section, and select Open Anyway after attempting to launch it. Confirm that you trust the download before proceeding.
+Important: PaperBack is not currently signed with an Apple Developer ID or notarized by Apple. If macOS blocks the app, open System Settings → Privacy & Security, scroll to the Security section, and select Open Anyway after attempting to launch it.
 
 PaperBack is provided as-is. Please report any problems through GitHub Issues.
 
