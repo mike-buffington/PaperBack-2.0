@@ -26,7 +26,7 @@ In Xcode, choose the **PaperBack** scheme, destination **My Mac**, then **Produc
 
 ## Downloading the app
 
-Authorized collaborators can download the application ZIP from the repository's **Releases** page. The macOS application is built on a Mac and is **not included** in the source repository.
+Download the macOS application ZIP from the repository's **Releases** page.
 
 ## Compatibility and security
 
