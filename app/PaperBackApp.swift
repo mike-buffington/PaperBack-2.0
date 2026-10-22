@@ -234,10 +234,17 @@ struct BackupLayoutView: View {
         guard let source,
               let attributes = try? FileManager.default.attributesOfItem(atPath: source.path),
               let bytes = attributes[.size] as? NSNumber else { return 0 }
-        let padded = ((bytes.intValue + 15) / 16) * 16
-        let dataBlocks = (padded + 89) / 90
-        let groups = (dataBlocks + recoveryGroupSize - 1) / recoveryGroupSize
-        return (groups + 1) * (recoveryGroupSize + 1)
+        // Use overflow-safe arithmetic: large PDFs can exceed one page.
+        let fileBytes = bytes.int64Value
+        guard fileBytes > 0 else { return 0 }
+        let padded = ((fileBytes - 1) / 16 + 1) * 16
+        let dataBlocks = (padded - 1) / 90 + 1
+        let groupSize = Int64(recoveryGroupSize)
+        let groups = (dataBlocks - 1) / groupSize + 1
+        // No single-page grid can contain more than 100 × 100 cells.
+        // Return a sentinel rather than overflowing the multiplication.
+        guard groups <= 10000 / (groupSize + 1) else { return 10001 }
+        return Int((groups + 1) * (groupSize + 1))
     }
 
     // The single-page encrypted encoder accepts a grid with spare cells.
@@ -245,7 +252,9 @@ struct BackupLayoutView: View {
     // requirement that has usable factor pairs, then offer every orientation.
     private var encryptedGridCells: Int {
         let required = encryptedRequiredCells
-        guard required > 0 else { return 0 }
+        // Swift traps when a closed range starts above its end (e.g. 12000...10000).
+        // Oversized encrypted files should offer Multi-page PNG, not crash.
+        guard required > 0 && required <= 10000 else { return 0 }
         for total in required...10000 {
             let pairs = (3...100).filter { x in
                 total % x == 0 && total / x >= 3 && total / x <= 100 &&
@@ -327,6 +336,11 @@ struct BackupLayoutView: View {
                 }
                 .pickerStyle(.menu)
                 .disabled(busy || choices.isEmpty)
+                if encryptBackup && choices.isEmpty {
+                    Text("This file is too large for a single encrypted PNG. Enable Multi-page PNG to split it into pages.")
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if fourPageMode {
                 Picker("Layout mode", selection: $layoutMode) {
