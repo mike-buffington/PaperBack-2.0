@@ -1,3 +1,4 @@
+# PaperBack 2.0 for macOS
 PaperBack is a native macOS application for encoding files as printable PaperBak backup images and restoring files from PNG or BMP backup images. Uses the source code from Oleh Yuschuk's **PaperBack** (https://www.ollydbg.de/Paperbak/index.html).
 
 ## New Features:
