@@ -1,0 +1,296 @@
+#import "PaperBakBridge.h"
+#include "bmp_loader.h"
+#include "paperbak_decoder.h"
+#include "paperbak_format.h"
+#include "paperbak_restore.h"
+#include "paperbak_encode.h"
+#include "paperbak_crypto.h"
+#import <AppKit/AppKit.h>
+#include <bzlib.h>
+#include <cstring>
+#include <algorithm>
+#include <cstdint>
+#include <fstream>
+#include <stdexcept>
+#include <vector>
+#include <string>
+
+using uchar=unsigned char;
+using ushort=unsigned short;
+extern ushort Crc16(uchar*,int);
+
+namespace {
+struct Scan {
+    paperbak::DecodePageResult decoded;
+    paperbak::SuperDataBlock metadata{};
+    std::string name;
+};
+Scan scan(const std::string &path) {
+    paperbak::Bitmap bmp;
+    const auto dot = path.find_last_of('.');
+    std::string extension = dot == std::string::npos ? "" : path.substr(dot);
+    for (char &c : extension) if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
+    if (extension == ".png") {
+        NSString *filePath = [NSString stringWithUTF8String:path.c_str()];
+        NSBitmapImageRep *image = [[NSBitmapImageRep alloc] initWithData:[NSData dataWithContentsOfFile:filePath]];
+        if (!image) throw std::runtime_error("Unable to open PNG image");
+        const NSInteger w = image.pixelsWide, h = image.pixelsHigh;
+        if (w <= 0 || h <= 0 || w > 20000 || h > 20000 || (uint64_t)w * (uint64_t)h > 100000000)
+            throw std::runtime_error("Unsupported PNG dimensions");
+        // Decode all pixels at once using Core Graphics. AppKit's colorAtX:y:
+        // is extremely slow for multi-million-pixel backup images.
+        CGImageRef cgImage = image.CGImage;
+        if (!cgImage) throw std::runtime_error("Unable to decode PNG pixels");
+        CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
+        if (!gray) throw std::runtime_error("Unable to create grayscale color space");
+        bmp.width = int(w);
+        bmp.height = int(h);
+        bmp.pixels.resize(size_t(w) * size_t(h));
+        CGContextRef context = CGBitmapContextCreate(bmp.pixels.data(),
+            size_t(w), size_t(h), 8, size_t(w), gray, kCGImageAlphaNone);
+        CGColorSpaceRelease(gray);
+        if (!context) throw std::runtime_error("Unable to create PNG pixel buffer");
+        // Convert Core Graphics' bottom-left coordinate system to top-left.
+        CGContextTranslateCTM(context, 0, CGFloat(h));
+        CGContextScaleCTM(context, 1, -1);
+        CGContextSetInterpolationQuality(context, kCGInterpolationNone);
+        CGContextDrawImage(context, CGRectMake(0, 0, CGFloat(w), CGFloat(h)), cgImage);
+        CGContextRelease(context);
+    } else {
+        bmp = paperbak::load_bmp(path);
+    }
+    Scan result;
+    result.decoded=paperbak::decode_page(bmp.pixels.data(),bmp.width,bmp.height);
+    if (!result.decoded.rasterFound || result.decoded.blocks.empty()) throw std::runtime_error("No readable PaperBak blocks");
+    bool found=false;
+    for (const auto &entry:result.decoded.blocks) {
+        if (entry.block.address!=paperbak::kSuperblockAddress) continue;
+        paperbak::SuperDataBlock s{};
+        std::memcpy(&s,&entry.block,sizeof(s));
+        if (!found) { result.metadata=s; found=true; }
+        else if (s.dataSize!=result.metadata.dataSize || s.originalSize!=result.metadata.originalSize ||
+                 s.mode!=result.metadata.mode || s.fileCrc!=result.metadata.fileCrc ||
+                 std::memcmp(s.name,result.metadata.name,(s.mode & paperbak::kEncrypted) ? 32 : 64)!=0)
+            throw std::runtime_error("Conflicting superblock metadata");
+    }
+    if (!found) throw std::runtime_error("No superblock found");
+    if (!result.metadata.dataSize || result.metadata.dataSize>100000000 || result.metadata.originalSize>100000000)
+        throw std::runtime_error("Unsupported backup size");
+    const size_t nameLimit = (result.metadata.mode & paperbak::kEncrypted) ? 32 : 64;
+    result.name.assign(result.metadata.name,result.metadata.name+nameLimit);
+    const auto terminator = result.name.find('\0');
+    if (terminator != std::string::npos) result.name.resize(terminator);
+    return result;
+}
+// Step 12A: assemble independently scanned pages of one Windows-compatible backup.
+struct MultiScan {
+    paperbak::SuperDataBlock metadata{};
+    std::string name;
+    std::vector<Scan> pages;
+    int readableBlocks = 0;
+};
+MultiScan scanPages(const std::vector<std::string> &paths) {
+    if (paths.empty()) throw std::runtime_error("Select at least one backup page");
+    MultiScan combined;
+    std::vector<unsigned> pageNumbers;
+    for (const auto &path : paths) {
+        Scan page = scan(path);
+        const auto &m = page.metadata;
+        if (pageNumbers.empty()) { combined.metadata = m; combined.name = page.name; }
+        else if (m.dataSize != combined.metadata.dataSize ||
+                 m.pageSize != combined.metadata.pageSize ||
+                 m.originalSize != combined.metadata.originalSize ||
+                 m.mode != combined.metadata.mode ||
+                 m.fileCrc != combined.metadata.fileCrc ||
+                 page.name != combined.name)
+            throw std::runtime_error("Selected pages belong to different backups");
+        if (m.page == 0 || std::find(pageNumbers.begin(), pageNumbers.end(), m.page) != pageNumbers.end())
+            throw std::runtime_error("Duplicate or invalid PaperBak page number");
+        pageNumbers.push_back(m.page);
+        combined.readableBlocks += page.decoded.goodBlocks;
+        combined.pages.push_back(std::move(page));
+    }
+    return combined;
+}
+void restorePages(const std::vector<std::string> &paths,const std::string &destination,const std::string &password) {
+    MultiScan s=scanPages(paths);
+    const auto &m=s.metadata;
+    if (m.mode & ~unsigned(paperbak::kCompressed|paperbak::kEncrypted)) throw std::runtime_error("Unknown backup mode");
+    paperbak::RestoreBuffer buffer(m.dataSize);
+    for (const auto &page:s.pages) for (const auto &entry:page.decoded.blocks) {
+        const auto &b=entry.block;
+        if (b.address==paperbak::kSuperblockAddress) continue;
+        const std::uint32_t group=b.address>>28;
+        if (!group) buffer.AddDataBlock(b.address,b.data);
+        else buffer.AddRecoveryBlock(b.address & 0x0fffffffu,group*paperbak::kDataBytes,b.data);
+    }
+    buffer.RecoverMissingBlocks();
+    if (!buffer.IsComplete()) throw std::runtime_error("Incomplete backup: select all pages (some data blocks are missing)");
+    auto stored=buffer.Bytes();
+    if (m.mode & paperbak::kEncrypted) {
+        if (password.empty()) throw std::runtime_error("Password required for this encrypted backup");
+        // PaperBak stores salt and IV in bytes 32..63 of the 64-byte name field.
+        const auto* salt = reinterpret_cast<const std::uint8_t*>(m.name+32);
+        stored = paperbak::cryptBackup(stored,password,salt,false);
+    }
+    if (Crc16(stored.data(),static_cast<int>(stored.size()))!=m.fileCrc)
+        throw std::runtime_error((m.mode & paperbak::kEncrypted) ? "Incorrect password or damaged backup" : "Stored-data CRC mismatch");
+    std::vector<std::uint8_t> bytes;
+    if (m.mode & paperbak::kCompressed) {
+        bytes.resize(m.originalSize);
+        unsigned int size=static_cast<unsigned int>(bytes.size());
+        const int rc=BZ2_bzBuffToBuffDecompress(reinterpret_cast<char*>(bytes.data()),&size,
+             reinterpret_cast<char*>(stored.data()),static_cast<unsigned int>(stored.size()),0,0);
+        if (rc!=BZ_OK || size!=bytes.size()) throw std::runtime_error("BZip2 decompression failed");
+    } else {
+        if (m.originalSize>stored.size()) throw std::runtime_error("Original size exceeds stored data");
+        bytes.assign(stored.begin(),stored.begin()+m.originalSize);
+    }
+    std::ofstream f(destination,std::ios::binary|std::ios::trunc);
+    if (!f || !f.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size())))
+        throw std::runtime_error("Unable to write restored file");
+}
+std::vector<std::string> pathsFromNSArray(NSArray<NSString *> *paths) {
+    std::vector<std::string> result;
+    for (NSString *path in paths) result.emplace_back(path.fileSystemRepresentation);
+    return result;
+}
+void restore(const std::string &source,const std::string &destination,const std::string &password) {
+    auto s=scan(source);
+    const auto &m=s.metadata;
+    if (m.mode & ~unsigned(paperbak::kCompressed|paperbak::kEncrypted)) throw std::runtime_error("Unknown backup mode");
+    paperbak::RestoreBuffer buffer(m.dataSize);
+    for (const auto &entry:s.decoded.blocks) {
+        const auto &b=entry.block;
+        if (b.address==paperbak::kSuperblockAddress) continue;
+        const std::uint32_t group=b.address>>28;
+        if (!group) buffer.AddDataBlock(b.address,b.data);
+        else buffer.AddRecoveryBlock(b.address & 0x0fffffffu,group*paperbak::kDataBytes,b.data);
+    }
+    buffer.RecoverMissingBlocks();
+    if (!buffer.IsComplete()) throw std::runtime_error("Incomplete backup: some blocks are missing");
+    auto stored=buffer.Bytes();
+    if (m.mode & paperbak::kEncrypted) {
+        if (password.empty()) throw std::runtime_error("Password required for this encrypted backup");
+        // PaperBak stores salt and IV in bytes 32..63 of the 64-byte name field.
+        const auto* salt = reinterpret_cast<const std::uint8_t*>(m.name+32);
+        stored = paperbak::cryptBackup(stored,password,salt,false);
+    }
+    if (Crc16(stored.data(),static_cast<int>(stored.size()))!=m.fileCrc)
+        throw std::runtime_error((m.mode & paperbak::kEncrypted) ? "Incorrect password or damaged backup" : "Stored-data CRC mismatch");
+    std::vector<std::uint8_t> bytes;
+    if (m.mode & paperbak::kCompressed) {
+        bytes.resize(m.originalSize);
+        unsigned int size=static_cast<unsigned int>(bytes.size());
+        const int rc=BZ2_bzBuffToBuffDecompress(reinterpret_cast<char*>(bytes.data()),&size,
+             reinterpret_cast<char*>(stored.data()),static_cast<unsigned int>(stored.size()),0,0);
+        if (rc!=BZ_OK || size!=bytes.size()) throw std::runtime_error("BZip2 decompression failed");
+    } else {
+        if (m.originalSize>stored.size()) throw std::runtime_error("Original size exceeds stored data");
+        bytes.assign(stored.begin(),stored.begin()+m.originalSize);
+    }
+    std::ofstream f(destination,std::ios::binary|std::ios::trunc);
+    if (!f || !f.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size())))
+        throw std::runtime_error("Unable to write restored file");
+}
+NSError *errorFor(const std::exception &e) {
+    return [NSError errorWithDomain:@"PaperBakMac" code:1 userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithUTF8String:e.what()]}];
+}
+}
+@implementation PaperBakBridge
++ (NSDictionary<NSString *, id> *)inspectPages:(NSArray<NSString *> *)paths error:(NSError **)error {
+    try {
+        auto s=scanPages(pathsFromNSArray(paths));
+        NSMutableArray<NSNumber *> *numbers=[NSMutableArray array];
+        for (const auto &page:s.pages) [numbers addObject:@(page.metadata.page)];
+        return @{ @"name": [NSString stringWithUTF8String:s.name.c_str()],
+                  @"size": @(s.metadata.originalSize), @"storedSize": @(s.metadata.dataSize),
+                  @"pages": @(s.pages.size()), @"pageNumbers": numbers,
+                  @"blocks": @(s.readableBlocks),
+                  @"encrypted": @((s.metadata.mode & paperbak::kEncrypted)!=0) };
+    } catch (const std::exception &e) { if(error) *error=errorFor(e); return nil; }
+}
++ (BOOL)restorePages:(NSArray<NSString *> *)paths to:(NSString *)destination password:(NSString *)password error:(NSError **)error {
+    try { ::restorePages(pathsFromNSArray(paths),std::string(destination.fileSystemRepresentation),std::string(password.UTF8String ?: "")); return YES; }
+    catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
+}
+
++ (NSDictionary<NSString *, id> *)inspect:(NSString *)path error:(NSError **)error {
+    try {
+        auto s=scan(std::string(path.fileSystemRepresentation));
+        return @{ @"name": [NSString stringWithUTF8String:s.name.c_str()],
+                  @"size": @(s.metadata.originalSize), @"storedSize": @(s.metadata.dataSize),
+                  @"page": @(s.metadata.page), @"blocks": @(s.decoded.goodBlocks),
+                  @"encrypted": @((s.metadata.mode & paperbak::kEncrypted)!=0) };
+    } catch (const std::exception &e) { if(error) *error=errorFor(e); return nil; }
+}
++ (BOOL)restore:(NSString *)source to:(NSString *)destination password:(NSString *)password error:(NSError **)error {
+    try { ::restore(std::string(source.fileSystemRepresentation),std::string(destination.fileSystemRepresentation),std::string(password.UTF8String ?: "")); return YES; }
+    catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
+}
++ (NSInteger)requiredCells:(NSString *)path error:(NSError **)error {
+    try { return paperbak::requiredCells(std::string(path.fileSystemRepresentation)); }
+    catch(const std::exception &e) { if(error) *error=errorFor(e); return -1; }
+}
++ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns error:(NSError **)error {
+    try {
+        auto page=paperbak::encodeFile(std::string(source.fileSystemRepresentation),int(columns));
+        NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:page.width pixelsHigh:page.height bitsPerSample:8 samplesPerPixel:1 hasAlpha:NO isPlanar:NO colorSpaceName:NSCalibratedWhiteColorSpace bytesPerRow:page.width bitsPerPixel:8];
+        if (!bitmap || !bitmap.bitmapData) throw std::runtime_error("Unable to allocate PNG bitmap");
+        for(int y=0;y<page.height;y++) std::memcpy(bitmap.bitmapData+y*bitmap.bytesPerRow,page.pixels.data()+size_t(y)*page.width,page.width);
+        NSData *png=[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+        if(!png || ![png writeToFile:destination atomically:YES]) throw std::runtime_error("Unable to write PNG");
+        return YES;
+    } catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
+}
+
++ (BOOL)createEncryptedPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns rows:(NSInteger)rows recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password error:(NSError **)error {
+    try {
+        if (password.length == 0) throw std::runtime_error("A password is required");
+        if (columns < 3 || columns > 100 || rows < 3 || rows > 100) throw std::runtime_error("Columns and Rows must each be between 3 and 100");
+        const auto size = std::filesystem::file_size(std::string(source.fileSystemRepresentation));
+        const int r = int(recoveryGroupSize);
+        if (r < 1 || r > 15) throw std::runtime_error("Invalid recovery group size");
+        const uint64_t aligned = ((size + 15) / 16) * 16;
+        const uint64_t dataBlocks = (aligned + 89) / 90;
+        const uint64_t groups = (dataBlocks + r - 1) / r;
+        const uint64_t cells = (groups + 1) * (r + 1);
+        if (uint64_t(columns) * uint64_t(rows) < cells)
+            throw std::runtime_error("Selected Columns × Rows grid is too small for this encrypted backup. Increase the dimensions or enable Multi-page PNG.");
+        auto pages = paperbak::encodePages(std::string(source.fileSystemRepresentation),int(columns),int(rows),1,r,std::string(password.UTF8String ?: ""));
+        if (pages.size() != 1) throw std::runtime_error("Expected one encrypted PNG");
+        const auto &page=pages.front();
+        NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:page.width pixelsHigh:page.height bitsPerSample:8 samplesPerPixel:1 hasAlpha:NO isPlanar:NO colorSpaceName:NSCalibratedWhiteColorSpace bytesPerRow:page.width bitsPerPixel:8];
+        if(!bitmap || !bitmap.bitmapData) throw std::runtime_error("Unable to allocate PNG bitmap");
+        for(int y=0;y<page.height;y++) std::memcpy(bitmap.bitmapData+y*bitmap.bytesPerRow,page.pixels.data()+size_t(y)*page.width,page.width);
+        NSData *png=[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+        if(!png || ![png writeToFile:destination atomically:YES]) throw std::runtime_error("Unable to write encrypted PNG");
+        return YES;
+    } catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
+}
+
++ (BOOL)createMultiPagePNGs:(NSString *)source destinationFolder:(NSString *)folder columns:(NSInteger)columns rows:(NSInteger)rows pages:(NSInteger)pages recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password error:(NSError **)error {
+    try {
+        auto images=paperbak::encodePages(std::string(source.fileSystemRepresentation),int(columns),int(rows),int(pages),int(recoveryGroupSize),std::string(password.UTF8String ?: ""));
+        NSString *stem=[[source lastPathComponent] stringByDeletingPathExtension];
+        if (stem.length == 0) stem=@"PaperBak";
+        NSFileManager *fm=[NSFileManager defaultManager];
+        for(size_t i=0;i<images.size();i++) {
+            NSString *name=[NSString stringWithFormat:@"%@_%04lu.png",stem,(unsigned long)i+1];
+            NSString *path=[folder stringByAppendingPathComponent:name];
+            if([fm fileExistsAtPath:path]) throw std::runtime_error("Output already exists; choose an empty folder to avoid overwriting pages");
+        }
+        for(size_t i=0;i<images.size();i++) {
+            const auto &page=images[i];
+            NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:page.width pixelsHigh:page.height bitsPerSample:8 samplesPerPixel:1 hasAlpha:NO isPlanar:NO colorSpaceName:NSCalibratedWhiteColorSpace bytesPerRow:page.width bitsPerPixel:8];
+            if(!bitmap || !bitmap.bitmapData) throw std::runtime_error("Unable to allocate page bitmap");
+            for(int y=0;y<page.height;y++) std::memcpy(bitmap.bitmapData+y*bitmap.bytesPerRow,page.pixels.data()+size_t(y)*page.width,page.width);
+            NSData *png=[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+            NSString *name=[NSString stringWithFormat:@"%@_%04lu.png",stem,(unsigned long)i+1];
+            NSString *path=[folder stringByAppendingPathComponent:name];
+            if(!png || ![png writeToFile:path atomically:YES]) throw std::runtime_error("Unable to save PNG page");
+        }
+        return YES;
+    } catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
+}
+@end
