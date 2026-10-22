@@ -174,10 +174,11 @@ struct ContentView: View {
 }
 
 
-// Create an uncompressed PaperBak PNG backup.
+// Create a PaperBak PNG backup using the selected compression method.
 struct BackupLayoutView: View {
     @State private var source: URL?
     @State private var count = 0
+    @State private var encodedSourceBytes: Int64 = 0
     @State private var columns = 0
     @State private var message = ""
     @State private var busy = false
@@ -196,13 +197,15 @@ struct BackupLayoutView: View {
     @State private var manualColumns = 23
     @State private var manualRows = 30
     @State private var dotPercent = 100
+    @State private var compressionMethod = "original"
+    @State private var lzmaLevel = 5
     @State private var encryptBackup = false
     @State private var backupPassword = ""
     @State private var confirmPassword = ""
 
     private var proposedGrid: (x: Int, y: Int, pages: Int, blockSize: Double)? {
-        guard let source, count > 0 else { return nil }
-        let bytes = (try? FileManager.default.attributesOfItem(atPath: source.path)[.size] as? NSNumber)?.intValue ?? 0
+        guard source != nil, count > 0 else { return nil }
+        let bytes = Int(encodedSourceBytes)
         guard bytes > 0 else { return nil }
         let dataBlocks = (bytes + 89) / 90
         let groups = (dataBlocks + recoveryGroupSize - 1) / recoveryGroupSize
@@ -245,11 +248,9 @@ struct BackupLayoutView: View {
     // stores one extra recovery/metadata group. Use that count to choose
     // a fresh, compact near-square grid when encryption is toggled.
     private var encryptedRequiredCells: Int {
-        guard let source,
-              let attributes = try? FileManager.default.attributesOfItem(atPath: source.path),
-              let bytes = attributes[.size] as? NSNumber else { return 0 }
-        // Use overflow-safe arithmetic: large PDFs can exceed one page.
-        let fileBytes = bytes.int64Value
+        guard source != nil else { return 0 }
+        // Account for the selected compression method when estimating layout.
+        let fileBytes = encodedSourceBytes
         guard fileBytes > 0 else { return 0 }
         let padded = ((fileBytes - 1) / 16 + 1) * 16
         let dataBlocks = (padded - 1) / 90 + 1
@@ -437,6 +438,26 @@ struct BackupLayoutView: View {
                 .disabled(busy)
                 Text("Smaller dots may require a higher-quality printer or scan.")
                     .font(.caption).foregroundStyle(.secondary)
+                Picker("Compression", selection: $compressionMethod) {
+                    Text("None (Uncompressed)").tag("none")
+                    Text("Original PaperBak (Windows compatible)").tag("original")
+                    Text("7-Zip / LZMA2").tag("lzma2")
+                }
+                .pickerStyle(.menu)
+                .disabled(busy)
+                .onChange(of: compressionMethod) { _ in refreshCompressionEstimate() }
+                if compressionMethod == "lzma2" {
+                    Picker("Compression level", selection: $lzmaLevel) {
+                        Text("Fast").tag(1)
+                        Text("Normal").tag(5)
+                        Text("Ultra").tag(9)
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(busy)
+                    .onChange(of: lzmaLevel) { _ in refreshCompressionEstimate() }
+                    Text("LZMA2 backups require PaperBack for macOS to restore; original Windows PaperBak cannot read them.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("Encrypt backup with password", isOn: $encryptBackup).disabled(busy)
                     .onChange(of: encryptBackup) { enabled in
                         if !fourPageMode {
@@ -503,10 +524,39 @@ struct BackupLayoutView: View {
             guard n > 0 else { throw NSError(domain: "PaperBak", code: 1) }
             source = url
             count = n
-            if encryptBackup && !fourPageMode { chooseEncryptedGrid() }
-            else { chooseUnencryptedGrid() }
-            message = ""
+            encodedSourceBytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+            // Recalculate for all modes: BZip2 and LZMA2 change the
+            // encoded size, while None uses the original source size.
+            refreshCompressionEstimate()
         } catch { message = error.localizedDescription }
+    }
+    private func refreshCompressionEstimate() {
+        guard let source else { return }
+        busy = true
+        message = "Calculating compressed backup size…"
+        let method = compressionMethod
+        let level = lzmaLevel
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let result = try PaperBakBridge.sourceLayout(source.path, compression: method, lzmaLevel: level)
+                guard let cells = result["cells"]?.intValue,
+                      let bytes = result["bytes"] else {
+                    throw NSError(domain: "PaperBack", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unable to calculate compressed layout"])
+                }
+                DispatchQueue.main.async {
+                    // Discard stale results when the user changes compression during processing.
+                    guard self.source == source && self.compressionMethod == method && self.lzmaLevel == level else { return }
+                    count = cells
+                    encodedSourceBytes = bytes.int64Value
+                    if encryptBackup && !fourPageMode { chooseEncryptedGrid() }
+                    else { chooseUnencryptedGrid() }
+                    busy = false
+                    message = ""
+                }
+            } catch {
+                DispatchQueue.main.async { busy = false; message = error.localizedDescription }
+            }
+        }
     }
     private func generate() {
         guard let source else { return }
@@ -525,12 +575,14 @@ struct BackupLayoutView: View {
         let y = encryptBackup && columns > 0 ? encryptedGridCells / columns : 0
         let password = encryptBackup ? backupPassword : ""
         let selectedDotPercent = dotPercent
+        let selectedCompression = compressionMethod
+        let selectedLzmaLevel = lzmaLevel
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 if password.isEmpty {
-                    try PaperBakBridge.createPNG(source.path, destination: url.path, columns: x, dotPercent: selectedDotPercent)
+                    try PaperBakBridge.createPNG(source.path, destination: url.path, columns: x, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel)
                 } else {
-                    try PaperBakBridge.createEncryptedPNG(source.path, destination: url.path, columns: x, rows: y, recoveryGroupSize: recoveryGroupSize, password: password, dotPercent: selectedDotPercent)
+                    try PaperBakBridge.createEncryptedPNG(source.path, destination: url.path, columns: x, rows: y, recoveryGroupSize: recoveryGroupSize, password: password, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel)
                 }
                 DispatchQueue.main.async { message = "PNG saved: \(url.lastPathComponent)"; busy = false }
             } catch {
@@ -554,9 +606,11 @@ struct BackupLayoutView: View {
         let selectedMaximumPages = maximumPages
         let password = encryptBackup ? backupPassword : ""
         let selectedDotPercent = dotPercent
+        let selectedCompression = compressionMethod
+        let selectedLzmaLevel = lzmaLevel
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                try PaperBakBridge.createMultiPagePNGs(source.path, destinationFolder: folder.path, columns: selectedColumns, rows: selectedRows, pages: selectedMaximumPages, recoveryGroupSize: selectedRecoveryGroupSize, password: password, dotPercent: selectedDotPercent)
+                try PaperBakBridge.createMultiPagePNGs(source.path, destinationFolder: folder.path, columns: selectedColumns, rows: selectedRows, pages: selectedMaximumPages, recoveryGroupSize: selectedRecoveryGroupSize, password: password, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel)
                 DispatchQueue.main.async {
                     message = "PNG pages Generated and Saved in \"\(folder.path)\""
                     busy = false

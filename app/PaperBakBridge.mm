@@ -5,12 +5,16 @@
 #include "paperbak_restore.h"
 #include "paperbak_encode.h"
 #include "paperbak_crypto.h"
+#include "paperbak_lzma.h"
+#include <filesystem>
 #import <AppKit/AppKit.h>
 #include <bzlib.h>
 #include <cstring>
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 #include <string>
@@ -20,6 +24,51 @@ using ushort=unsigned short;
 extern ushort Crc16(uchar*,int);
 
 namespace {
+struct PreparedInput {
+    std::string path;
+    std::filesystem::path folder;
+    std::uint32_t originalSize = 0;
+    bool nativeCompressed = false;
+    PreparedInput(const std::string &source,const std::string &method,int level):path(source) {
+        const auto sourceLength=std::filesystem::file_size(source);
+        if(sourceLength==0 || sourceLength>std::numeric_limits<std::uint32_t>::max())
+            throw std::runtime_error("Source file size is unsupported");
+        originalSize=std::uint32_t(sourceLength);
+        // Uncompressed backups use the original input directly. No temporary
+        // file or compression flag is required; the encoder retains its name.
+        if(method=="none") return;
+        std::vector<std::uint8_t> compressed;
+        if(method=="original") {
+            // PaperBak's native compressed-data mode uses a BZip2 stream.
+            std::ifstream in(source,std::ios::binary);
+            if(!in) throw std::runtime_error("Unable to open input for BZip2 compression");
+            std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),{});
+            if(bytes.size()>std::numeric_limits<unsigned int>::max()-600)
+                throw std::runtime_error("File too large for BZip2 compression");
+            unsigned int capacity=unsigned(bytes.size()+bytes.size()/100+601);
+            compressed.resize(capacity);
+            const int rc=BZ2_bzBuffToBuffCompress(reinterpret_cast<char*>(compressed.data()),&capacity,
+                reinterpret_cast<char*>(bytes.data()),unsigned(bytes.size()),9,0,30);
+            if(rc!=BZ_OK) throw std::runtime_error("Native BZip2 compression failed");
+            compressed.resize(capacity);
+            nativeCompressed=true;
+        } else if(method=="lzma2") {
+            compressed=paperbak::wrapLzma2(source,level);
+        } else {
+            throw std::runtime_error("Unknown compression method");
+        }
+        NSString *tmp=[[NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]] stringByStandardizingPath];
+        folder=std::string(tmp.fileSystemRepresentation);
+        std::filesystem::create_directories(folder);
+        path=(folder/std::filesystem::path(source).filename()).string();
+        std::ofstream out(path,std::ios::binary|std::ios::trunc);
+        if(!out || !out.write(reinterpret_cast<const char*>(compressed.data()),std::streamsize(compressed.size())))
+            throw std::runtime_error("Unable to write temporary compressed backup data");
+    }
+    ~PreparedInput() { if(!folder.empty()) {std::error_code ec;std::filesystem::remove_all(folder,ec);} }
+    PreparedInput(const PreparedInput&)=delete;
+    PreparedInput& operator=(const PreparedInput&)=delete;
+};
 struct Scan {
     paperbak::DecodePageResult decoded;
     paperbak::SuperDataBlock metadata{};
@@ -146,6 +195,8 @@ void restorePages(const std::vector<std::string> &paths,const std::string &desti
         if (m.originalSize>stored.size()) throw std::runtime_error("Original size exceeds stored data");
         bytes.assign(stored.begin(),stored.begin()+m.originalSize);
     }
+    std::vector<std::uint8_t> expanded;
+    if(paperbak::unwrapLzma2(bytes,expanded)) bytes=std::move(expanded);
     std::ofstream f(destination,std::ios::binary|std::ios::trunc);
     if (!f || !f.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size())))
         throw std::runtime_error("Unable to write restored file");
@@ -189,6 +240,8 @@ void restore(const std::string &source,const std::string &destination,const std:
         if (m.originalSize>stored.size()) throw std::runtime_error("Original size exceeds stored data");
         bytes.assign(stored.begin(),stored.begin()+m.originalSize);
     }
+    std::vector<std::uint8_t> expanded;
+    if(paperbak::unwrapLzma2(bytes,expanded)) bytes=std::move(expanded);
     std::ofstream f(destination,std::ios::binary|std::ios::trunc);
     if (!f || !f.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size())))
         throw std::runtime_error("Unable to write restored file");
@@ -242,13 +295,22 @@ NSError *errorFor(const std::exception &e) {
     try { ::restore(std::string(source.fileSystemRepresentation),std::string(destination.fileSystemRepresentation),std::string(password.UTF8String ?: "")); return YES; }
     catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
 }
++ (NSDictionary<NSString *, NSNumber *> *)sourceLayout:(NSString *)source compression:(NSString *)compression lzmaLevel:(NSInteger)lzmaLevel error:(NSError **)error {
+    try {
+        PreparedInput prepared(std::string(source.fileSystemRepresentation),std::string(compression.UTF8String ?: "original"),int(lzmaLevel));
+        auto bytes=std::filesystem::file_size(prepared.path);
+        int cells=paperbak::requiredCells(prepared.path);
+        return @{ @"bytes": @(bytes), @"cells": @(cells) };
+    } catch(const std::exception &e) { if(error) *error=errorFor(e); return nil; }
+}
 + (NSInteger)requiredCells:(NSString *)path error:(NSError **)error {
     try { return paperbak::requiredCells(std::string(path.fileSystemRepresentation)); }
     catch(const std::exception &e) { if(error) *error=errorFor(e); return -1; }
 }
-+ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns dotPercent:(NSInteger)dotPercent error:(NSError **)error {
++ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns dotPercent:(NSInteger)dotPercent compression:(NSString *)compression lzmaLevel:(NSInteger)lzmaLevel error:(NSError **)error {
     try {
-        auto page=paperbak::encodeFile(std::string(source.fileSystemRepresentation),int(columns),int(dotPercent));
+        PreparedInput prepared(std::string(source.fileSystemRepresentation),std::string(compression.UTF8String ?: "original"),int(lzmaLevel));
+        auto page=paperbak::encodeFile(prepared.path,int(columns),int(dotPercent),prepared.nativeCompressed,prepared.originalSize);
         NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:page.width pixelsHigh:page.height bitsPerSample:8 samplesPerPixel:1 hasAlpha:NO isPlanar:NO colorSpaceName:NSCalibratedWhiteColorSpace bytesPerRow:page.width bitsPerPixel:8];
         if (!bitmap || !bitmap.bitmapData) throw std::runtime_error("Unable to allocate PNG bitmap");
         for(int y=0;y<page.height;y++) std::memcpy(bitmap.bitmapData+y*bitmap.bytesPerRow,page.pixels.data()+size_t(y)*page.width,page.width);
@@ -258,11 +320,12 @@ NSError *errorFor(const std::exception &e) {
     } catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
 }
 
-+ (BOOL)createEncryptedPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns rows:(NSInteger)rows recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password dotPercent:(NSInteger)dotPercent error:(NSError **)error {
++ (BOOL)createEncryptedPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns rows:(NSInteger)rows recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password dotPercent:(NSInteger)dotPercent compression:(NSString *)compression lzmaLevel:(NSInteger)lzmaLevel error:(NSError **)error {
     try {
         if (password.length == 0) throw std::runtime_error("A password is required");
         if (columns < 3 || columns > 100 || rows < 3 || rows > 100) throw std::runtime_error("Columns and Rows must each be between 3 and 100");
-        const auto size = std::filesystem::file_size(std::string(source.fileSystemRepresentation));
+        PreparedInput prepared(std::string(source.fileSystemRepresentation),std::string(compression.UTF8String ?: "original"),int(lzmaLevel));
+        const auto size = std::filesystem::file_size(prepared.path);
         const int r = int(recoveryGroupSize);
         if (r < 1 || r > 15) throw std::runtime_error("Invalid recovery group size");
         const uint64_t aligned = ((size + 15) / 16) * 16;
@@ -271,7 +334,7 @@ NSError *errorFor(const std::exception &e) {
         const uint64_t cells = (groups + 1) * (r + 1);
         if (uint64_t(columns) * uint64_t(rows) < cells)
             throw std::runtime_error("Selected Columns × Rows grid is too small for this encrypted backup. Increase the dimensions or enable Multi-page PNG.");
-        auto pages = paperbak::encodePages(std::string(source.fileSystemRepresentation),int(columns),int(rows),1,r,std::string(password.UTF8String ?: ""),int(dotPercent));
+        auto pages = paperbak::encodePages(prepared.path,int(columns),int(rows),1,r,std::string(password.UTF8String ?: ""),int(dotPercent),prepared.nativeCompressed,prepared.originalSize);
         if (pages.size() != 1) throw std::runtime_error("Expected one encrypted PNG");
         const auto &page=pages.front();
         NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:page.width pixelsHigh:page.height bitsPerSample:8 samplesPerPixel:1 hasAlpha:NO isPlanar:NO colorSpaceName:NSCalibratedWhiteColorSpace bytesPerRow:page.width bitsPerPixel:8];
@@ -283,9 +346,10 @@ NSError *errorFor(const std::exception &e) {
     } catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
 }
 
-+ (BOOL)createMultiPagePNGs:(NSString *)source destinationFolder:(NSString *)folder columns:(NSInteger)columns rows:(NSInteger)rows pages:(NSInteger)pages recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password dotPercent:(NSInteger)dotPercent error:(NSError **)error {
++ (BOOL)createMultiPagePNGs:(NSString *)source destinationFolder:(NSString *)folder columns:(NSInteger)columns rows:(NSInteger)rows pages:(NSInteger)pages recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password dotPercent:(NSInteger)dotPercent compression:(NSString *)compression lzmaLevel:(NSInteger)lzmaLevel error:(NSError **)error {
     try {
-        auto images=paperbak::encodePages(std::string(source.fileSystemRepresentation),int(columns),int(rows),int(pages),int(recoveryGroupSize),std::string(password.UTF8String ?: ""),int(dotPercent));
+        PreparedInput prepared(std::string(source.fileSystemRepresentation),std::string(compression.UTF8String ?: "original"),int(lzmaLevel));
+        auto images=paperbak::encodePages(prepared.path,int(columns),int(rows),int(pages),int(recoveryGroupSize),std::string(password.UTF8String ?: ""),int(dotPercent),prepared.nativeCompressed,prepared.originalSize);
         NSString *stem=[[source lastPathComponent] stringByDeletingPathExtension];
         if (stem.length == 0) stem=@"PaperBak";
         NSFileManager *fm=[NSFileManager defaultManager];

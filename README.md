@@ -15,7 +15,7 @@ Based on **Oleh Yuschuk's PaperBack**, [original PaperBak website](https://www.o
 
 ## Build on macOS
 
-Requirements: macOS 13 or later, Xcode, CMake, and BZip2 development support.
+Requirements: macOS 26 or later, Xcode, CMake, and BZip2 development support.
 
 ```bash
 cmake -S . -B xcode -G Xcode

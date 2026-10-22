@@ -66,7 +66,7 @@ void line(std::vector<uint8_t>&img,int w,int h,int x,int y,int len,bool horizont
 }
 }
 int requiredCells(const std::string &path){return read(path).cells;}
-EncodedPage encodeFile(const std::string &path,int columns,int dotPercent) {
+EncodedPage encodeFile(const std::string &path,int columns,int dotPercent,bool nativeCompressed,std::uint32_t originalSize) {
  if(dotPercent<50 || dotPercent>100) throw std::runtime_error("Dot size must be between 50 and 100 percent");
  Source s=read(path);
  if(columns<1 || s.cells%columns) throw std::runtime_error("Columns must divide the total cell count");
@@ -80,7 +80,8 @@ EncodedPage encodeFile(const std::string &path,int columns,int dotPercent) {
  std::vector<DataBlock> cells(size_t(columns)*rows);
  SuperDataBlock super{};
  super.address=0xFFFFFFFFu; super.dataSize=uint32_t((s.bytes.size()+89)/90*90);
- super.pageSize=super.dataSize; super.originalSize=uint32_t(s.bytes.size()); super.page=1;
+ super.pageSize=super.dataSize; super.originalSize=nativeCompressed ? originalSize : uint32_t(s.bytes.size()); super.page=1;
+ if(nativeCompressed) super.mode |= kCompressed;
  super.fileCrc=0;
  std::vector<uint8_t> padded= s.bytes; padded.resize(super.dataSize,0);
  super.fileCrc=Crc16(padded.data(),int(padded.size()));
@@ -120,7 +121,7 @@ EncodedPage encodeFile(const std::string &path,int columns,int dotPercent) {
  return out;
 }
 
-std::vector<EncodedPage> encodePages(const std::string &path,int columns,int fullRows,int pageCount,int recoveryGroupSize,const std::string &password,int dotPercent) {
+std::vector<EncodedPage> encodePages(const std::string &path,int columns,int fullRows,int pageCount,int recoveryGroupSize,const std::string &password,int dotPercent,bool nativeCompressed,std::uint32_t originalSize) {
  if(dotPercent<50 || dotPercent>100) throw std::runtime_error("Dot size must be between 50 and 100 percent");
  Source s=read(path);
  const bool encrypted = !password.empty();
@@ -164,9 +165,10 @@ std::vector<EncodedPage> encodePages(const std::string &path,int columns,int ful
  super.address=0xffffffffu;
  super.dataSize=encrypted ? storedLength : uint32_t(padded.size());
  super.pageSize=super.dataSize;
- super.originalSize=uint32_t(std::filesystem::file_size(path));
+ super.originalSize=nativeCompressed ? originalSize : uint32_t(std::filesystem::file_size(path));
  super.fileCrc=encrypted ? plaintextCRC : Crc16(padded.data(),int(padded.size()));
  if (encrypted) super.mode |= kEncrypted;
+ if (nativeCompressed) super.mode |= kCompressed;
  std::memcpy(super.name,s.name.data(),s.name.size());
  if (encrypted) std::memcpy(super.name+32,saltAndIV,32);
  std::vector<EncodedPage> pages;
