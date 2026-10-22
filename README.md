@@ -45,7 +45,7 @@ This project incorporates code derived from the original PaperBak implementation
 <img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 38 17 PM" src="https://github.com/user-attachments/assets/699079ed-39fe-477a-a686-af32bfb9638a" />
 <img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 39 23 PM" src="https://github.com/user-attachments/assets/4c718f44-8974-4b71-8823-01ddc71fa261" />
 
+<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0001" src="https://github.com/user-attachments/assets/bc68f0b0-5f70-4833-a981-6d8069cd2a01" />
+<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0002" src="https://github.com/user-attachments/assets/9bf73d51-3cf2-4a40-8a2e-f4ce2dbe058e" />
+<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0003" src="https://github.com/user-attachments/assets/5d36e861-ea09-45ad-8dda-4cf6e266aa5c" />
 
-<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0001" src="https://github.com/user-attachments/assets/31f62215-5f50-4da3-ac2b-5c91e6caab5b" />
-<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0002" src="https://github.com/user-attachments/assets/afd55f89-5521-4dd1-b586-eb6f12654627" />
-<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0003" src="https://github.com/user-attachments/assets/facdb397-7efc-47ba-aa39-7c56b459d4ef" />
