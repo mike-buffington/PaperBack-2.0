@@ -40,10 +40,11 @@ This project incorporates code derived from the original PaperBak implementation
 
 ## Screenshots and generated files
 
-<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 1 44 39 PM" src="https://github.com/user-attachments/assets/0cf92150-1d81-42d3-bd6d-d481cf376618" />
-<img width="1304" height="1152" alt="Screenshot 2026-10-22 at 2 12 44 PM" src="https://github.com/user-attachments/assets/ce7bed88-076d-4aed-8885-36d68aca5da0" />
-<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 1 42 36 PM" src="https://github.com/user-attachments/assets/85f5b70f-a70e-4656-b4ef-df876f66ea50" />
-<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 1 58 24 PM" src="https://github.com/user-attachments/assets/4abe493b-fab0-4b6c-b73c-bcef43489e6e" />
+<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 36 24 PM" src="https://github.com/user-attachments/assets/296208ac-dcef-4cb4-8dc5-e65e6bb1917e" />
+<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 37 01 PM" src="https://github.com/user-attachments/assets/376549c5-fc99-4611-9ddc-3a98cb32b189" />
+<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 38 17 PM" src="https://github.com/user-attachments/assets/699079ed-39fe-477a-a686-af32bfb9638a" />
+<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 39 23 PM" src="https://github.com/user-attachments/assets/4c718f44-8974-4b71-8823-01ddc71fa261" />
+
 
 <img width="6164" height="7844" alt="PaperBack-2 0-macOS_0001" src="https://github.com/user-attachments/assets/31f62215-5f50-4da3-ac2b-5c91e6caab5b" />
 <img width="6164" height="7844" alt="PaperBack-2 0-macOS_0002" src="https://github.com/user-attachments/assets/afd55f89-5521-4dd1-b586-eb6f12654627" />
