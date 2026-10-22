@@ -2,6 +2,7 @@
 #include "paperbak_format.h"
 #include "paperbak_crypto.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -21,7 +22,6 @@ Source read(const std::string &path) {
  if(!f) throw std::runtime_error("Cannot open input file");
  Source s; s.bytes.assign(std::istreambuf_iterator<char>(f),{});
  if(s.bytes.empty()) throw std::runtime_error("Empty files are not supported yet");
- if(s.bytes.size()>8000000) throw std::runtime_error("Step 11B supports files up to 8 MB");
  auto slash=path.find_last_of("/\\"); s.name=path.substr(slash==std::string::npos?0:slash+1);
  if(s.name.size()>63) throw std::runtime_error("Filename is too long for PaperBak: maximum 63 UTF-8 bytes for unencrypted backups (31 bytes for encrypted backups).");
  int n=int((s.bytes.size()+89)/90); s.strings=(n+R-1)/R;
@@ -33,14 +33,28 @@ void finish(DataBlock &b) {
  b.crc=uint16_t(Crc16(p,94)^0x55AA);
  Encode8(p,b.ecc,127);
 }
-void paint(std::vector<uint8_t> &image,int width,int height,int col,int row,const DataBlock &b) {
+void paint(std::vector<uint8_t> &image,int width,int height,int col,int row,const DataBlock &b,int dotPercent) {
  auto *p=reinterpret_cast<const uint8_t*>(&b);
  for(int y=0;y<32;y++) {
   uint32_t t=uint32_t(p[y*4])|(uint32_t(p[y*4+1])<<8)|(uint32_t(p[y*4+2])<<16)|(uint32_t(p[y*4+3])<<24);
   t^=(y%2)?0xAAAAAAAAu:0x55555555u;
   for(int x=0;x<32;x++) if(t&(1u<<x)) {
    int px=PAD+col*CELL+(x+2)*DOT, py=PAD+row*CELL+(y+2)*DOT;
-   for(int yy=0;yy<DOT;yy++) for(int xx=0;xx<DOT;xx++) image[size_t(py+yy)*width+px+xx]=0;
+   // The original Windows setting scales the printed black dot relative to its pitch.
+   // Keep the 4-pixel pitch and centre a smaller dot in each cell.
+   // Supersampling is not needed for the fixed-resolution monochrome raster.
+   const int diameter = std::max(1,(DOT*dotPercent+50)/100);
+   const int inset = (DOT-diameter)/2;
+   for(int yy=0;yy<diameter;yy++) for(int xx=0;xx<diameter;xx++) {
+     // At 50%, round corners for a circular dot; intermediate settings gradually round.
+     const double radius=double(diameter)/2.0;
+     const double cx=(xx+0.5)-radius, cy=(yy+0.5)-radius;
+     const double roundness=double(100-dotPercent)/50.0;
+     const double box=std::max(std::abs(cx),std::abs(cy));
+     const double circle=std::sqrt(cx*cx+cy*cy);
+     if ((1.0-roundness)*box+roundness*circle <= radius)
+       image[size_t(py+inset+yy)*width+px+inset+xx]=0;
+   }
   }
  }
 }
@@ -52,13 +66,14 @@ void line(std::vector<uint8_t>&img,int w,int h,int x,int y,int len,bool horizont
 }
 }
 int requiredCells(const std::string &path){return read(path).cells;}
-EncodedPage encodeFile(const std::string &path,int columns) {
+EncodedPage encodeFile(const std::string &path,int columns,int dotPercent) {
+ if(dotPercent<50 || dotPercent>100) throw std::runtime_error("Dot size must be between 50 and 100 percent");
  Source s=read(path);
  if(columns<1 || s.cells%columns) throw std::runtime_error("Columns must divide the total cell count");
  int rows=s.cells/columns;
  if(columns<3 || rows<3) throw std::runtime_error("For the first round-trip test choose a grid with at least 3 columns and 3 rows");
  int w=columns*CELL+DOT+PAD*2, h=rows*CELL+DOT+PAD*2;
- if(w>20000 || h>20000 || uint64_t(w)*h>120000000) throw std::runtime_error("Selected layout exceeds the supported image size");
+ if(w>20000 || h>20000 || uint64_t(w)*h>150000000) throw std::runtime_error("Selected layout exceeds the supported image size");
  EncodedPage out{columns,rows,w,h,std::vector<uint8_t>(size_t(w)*h,255)};
  for(int x=0;x<=columns;x++) line(out.pixels,w,h,PAD+x*CELL,PAD,rows*CELL+DOT,false);
  for(int y=0;y<=rows;y++) line(out.pixels,w,h,PAD,PAD+y*CELL,columns*CELL+DOT,true);
@@ -91,7 +106,7 @@ EncodedPage encodeFile(const std::string &path,int columns) {
   }
   finish(recovery); cells[pos(R,i+1)]=recovery;
  }
- for(int y=0;y<rows;y++) for(int x=0;x<columns;x++) paint(out.pixels,w,h,x,y,cells[size_t(y)*columns+x]);
+ for(int y=0;y<rows;y++) for(int x=0;x<columns;x++) paint(out.pixels,w,h,x,y,cells[size_t(y)*columns+x],dotPercent);
  // Crop only the outer page padding. Keep the grid boundary lines and
  // all block-internal quiet space intact for decoder compatibility.
  const int croppedWidth = w - 2*PAD, croppedHeight = h - 2*PAD;
@@ -105,7 +120,8 @@ EncodedPage encodeFile(const std::string &path,int columns) {
  return out;
 }
 
-std::vector<EncodedPage> encodePages(const std::string &path,int columns,int fullRows,int pageCount,int recoveryGroupSize,const std::string &password) {
+std::vector<EncodedPage> encodePages(const std::string &path,int columns,int fullRows,int pageCount,int recoveryGroupSize,const std::string &password,int dotPercent) {
+ if(dotPercent<50 || dotPercent>100) throw std::runtime_error("Dot size must be between 50 and 100 percent");
  Source s=read(path);
  const bool encrypted = !password.empty();
  if (encrypted && s.name.size()>31)
@@ -125,7 +141,7 @@ std::vector<EncodedPage> encodePages(const std::string &path,int columns,int ful
  if(R<1 || R>15) throw std::runtime_error("Recovery group size must be between 1 and 15");
  if(columns<3 || fullRows<3 || pageCount<1 || pageCount>1000)
   throw std::runtime_error("Invalid columns, rows, or page count");
- if(uint64_t(columns)*fullRows>100000 || uint64_t(columns*CELL+DOT)*(fullRows*CELL+DOT)>120000000)
+ if(uint64_t(columns)*fullRows>100000 || uint64_t(columns*CELL+DOT)*(fullRows*CELL+DOT)>150000000)
   throw std::runtime_error("Page dimensions exceed supported image size");
  const int groups=int(((s.bytes.size()+89)/90+R-1)/R);
  // pageCount is a MAXIMUM, not a required count. Fill pages sequentially,
@@ -195,13 +211,13 @@ std::vector<EncodedPage> encodePages(const std::string &path,int columns,int ful
    finish(recovery);blocks[position(R,i+1)]=recovery;
   }
   for(int y=0;y<rows;y++) for(int x=0;x<columns;x++)
-   paint(out.pixels,stageW,stageH,x,y,blocks[size_t(y)*columns+x]);
+   paint(out.pixels,stageW,stageH,x,y,blocks[size_t(y)*columns+x],dotPercent);
   std::vector<uint8_t> cropped(size_t(width)*height);
   for(int y=0;y<height;y++) std::memcpy(cropped.data()+size_t(y)*width,
       out.pixels.data()+size_t(y+PAD)*stageW+PAD,size_t(width));
   out.pixels=std::move(cropped);
   // paint() uses the legacy 25-pixel offset. Render into a padded staging
-  // buffer, then crop it, just like the verified Step 11D encoder.
+  // buffer, then crop it, as in the single-page encoder.
   pages.push_back(std::move(out));
   groupStart+=count;
  }

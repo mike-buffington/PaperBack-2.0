@@ -2,7 +2,7 @@
 
 PaperBack is a native macOS application for encoding files as printable PaperBak backup images and restoring files from PNG or BMP backup images.
 
-Based on **Oleh Yuschuk's PaperBack**, [original PaperBak website](https://www.ollydbg.de/Paperbak/index.html). Ported to the Mac by **Mike Buffington**.
+Based on **Oleh Yuschuk's PaperBack**, [original PaperBak website](https://www.ollydbg.de/Paperbak/index.html). Ported to macOS by **Mike Buffington**.
 
 ## Features
 

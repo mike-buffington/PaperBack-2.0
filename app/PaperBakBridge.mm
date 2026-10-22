@@ -35,7 +35,7 @@ Scan scan(const std::string &path) {
         NSBitmapImageRep *image = [[NSBitmapImageRep alloc] initWithData:[NSData dataWithContentsOfFile:filePath]];
         if (!image) throw std::runtime_error("Unable to open PNG image");
         const NSInteger w = image.pixelsWide, h = image.pixelsHigh;
-        if (w <= 0 || h <= 0 || w > 20000 || h > 20000 || (uint64_t)w * (uint64_t)h > 100000000)
+        if (w <= 0 || h <= 0 || w > 20000 || h > 20000 || (uint64_t)w * (uint64_t)h > 150000000)
             throw std::runtime_error("Unsupported PNG dimensions");
         // Decode all pixels at once using Core Graphics. AppKit's colorAtX:y:
         // is extremely slow for multi-million-pixel backup images.
@@ -82,7 +82,7 @@ Scan scan(const std::string &path) {
     if (terminator != std::string::npos) result.name.resize(terminator);
     return result;
 }
-// Step 12A: assemble independently scanned pages of one Windows-compatible backup.
+// Assemble independently scanned pages of one Windows-compatible backup.
 struct MultiScan {
     paperbak::SuperDataBlock metadata{};
     std::string name;
@@ -203,10 +203,24 @@ NSError *errorFor(const std::exception &e) {
         auto s=scanPages(pathsFromNSArray(paths));
         NSMutableArray<NSNumber *> *numbers=[NSMutableArray array];
         for (const auto &page:s.pages) [numbers addObject:@(page.metadata.page)];
+        NSMutableArray *qualityPages=[NSMutableArray array];
+        for (const auto &page:s.pages) {
+            const auto &d=page.decoded;
+            // -1 = unprocessed/unreadable, 0...16 = Reed-Solomon corrections.
+            NSMutableArray<NSNumber *> *cells=[NSMutableArray arrayWithCapacity:size_t(d.gridColumns)*d.gridRows];
+            for (int i=0;i<d.gridColumns*d.gridRows;i++) [cells addObject:@(-1)];
+            for (const auto &block:d.blocks) {
+                const int index=block.gridY*d.gridColumns+block.gridX;
+                if (index>=0 && index<(int)cells.count) cells[index]=@(block.eccCorrections);
+            }
+            [qualityPages addObject:@{ @"page": @(page.metadata.page), @"columns": @(d.gridColumns),
+                                       @"rows": @(d.gridRows), @"cells": cells,
+                                       @"bad": @(d.badBlocks), @"good": @(d.goodBlocks+d.superBlocks) }];
+        }
         return @{ @"name": [NSString stringWithUTF8String:s.name.c_str()],
                   @"size": @(s.metadata.originalSize), @"storedSize": @(s.metadata.dataSize),
                   @"pages": @(s.pages.size()), @"pageNumbers": numbers,
-                  @"blocks": @(s.readableBlocks),
+                  @"blocks": @(s.readableBlocks), @"qualityPages": qualityPages,
                   @"encrypted": @((s.metadata.mode & paperbak::kEncrypted)!=0) };
     } catch (const std::exception &e) { if(error) *error=errorFor(e); return nil; }
 }
@@ -232,9 +246,9 @@ NSError *errorFor(const std::exception &e) {
     try { return paperbak::requiredCells(std::string(path.fileSystemRepresentation)); }
     catch(const std::exception &e) { if(error) *error=errorFor(e); return -1; }
 }
-+ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns error:(NSError **)error {
++ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns dotPercent:(NSInteger)dotPercent error:(NSError **)error {
     try {
-        auto page=paperbak::encodeFile(std::string(source.fileSystemRepresentation),int(columns));
+        auto page=paperbak::encodeFile(std::string(source.fileSystemRepresentation),int(columns),int(dotPercent));
         NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:page.width pixelsHigh:page.height bitsPerSample:8 samplesPerPixel:1 hasAlpha:NO isPlanar:NO colorSpaceName:NSCalibratedWhiteColorSpace bytesPerRow:page.width bitsPerPixel:8];
         if (!bitmap || !bitmap.bitmapData) throw std::runtime_error("Unable to allocate PNG bitmap");
         for(int y=0;y<page.height;y++) std::memcpy(bitmap.bitmapData+y*bitmap.bytesPerRow,page.pixels.data()+size_t(y)*page.width,page.width);
@@ -244,7 +258,7 @@ NSError *errorFor(const std::exception &e) {
     } catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
 }
 
-+ (BOOL)createEncryptedPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns rows:(NSInteger)rows recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password error:(NSError **)error {
++ (BOOL)createEncryptedPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns rows:(NSInteger)rows recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password dotPercent:(NSInteger)dotPercent error:(NSError **)error {
     try {
         if (password.length == 0) throw std::runtime_error("A password is required");
         if (columns < 3 || columns > 100 || rows < 3 || rows > 100) throw std::runtime_error("Columns and Rows must each be between 3 and 100");
@@ -257,7 +271,7 @@ NSError *errorFor(const std::exception &e) {
         const uint64_t cells = (groups + 1) * (r + 1);
         if (uint64_t(columns) * uint64_t(rows) < cells)
             throw std::runtime_error("Selected Columns × Rows grid is too small for this encrypted backup. Increase the dimensions or enable Multi-page PNG.");
-        auto pages = paperbak::encodePages(std::string(source.fileSystemRepresentation),int(columns),int(rows),1,r,std::string(password.UTF8String ?: ""));
+        auto pages = paperbak::encodePages(std::string(source.fileSystemRepresentation),int(columns),int(rows),1,r,std::string(password.UTF8String ?: ""),int(dotPercent));
         if (pages.size() != 1) throw std::runtime_error("Expected one encrypted PNG");
         const auto &page=pages.front();
         NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:page.width pixelsHigh:page.height bitsPerSample:8 samplesPerPixel:1 hasAlpha:NO isPlanar:NO colorSpaceName:NSCalibratedWhiteColorSpace bytesPerRow:page.width bitsPerPixel:8];
@@ -269,9 +283,9 @@ NSError *errorFor(const std::exception &e) {
     } catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
 }
 
-+ (BOOL)createMultiPagePNGs:(NSString *)source destinationFolder:(NSString *)folder columns:(NSInteger)columns rows:(NSInteger)rows pages:(NSInteger)pages recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password error:(NSError **)error {
++ (BOOL)createMultiPagePNGs:(NSString *)source destinationFolder:(NSString *)folder columns:(NSInteger)columns rows:(NSInteger)rows pages:(NSInteger)pages recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password dotPercent:(NSInteger)dotPercent error:(NSError **)error {
     try {
-        auto images=paperbak::encodePages(std::string(source.fileSystemRepresentation),int(columns),int(rows),int(pages),int(recoveryGroupSize),std::string(password.UTF8String ?: ""));
+        auto images=paperbak::encodePages(std::string(source.fileSystemRepresentation),int(columns),int(rows),int(pages),int(recoveryGroupSize),std::string(password.UTF8String ?: ""),int(dotPercent));
         NSString *stem=[[source lastPathComponent] stringByDeletingPathExtension];
         if (stem.length == 0) stem=@"PaperBak";
         NSFileManager *fm=[NSFileManager defaultManager];

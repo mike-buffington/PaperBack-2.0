@@ -6,7 +6,7 @@
 + (NSDictionary<NSString *, id> * _Nullable)inspect:(NSString *)path error:(NSError **)error;
 + (BOOL)restore:(NSString *)source to:(NSString *)destination password:(NSString *)password error:(NSError **)error;
 + (NSInteger)requiredCells:(NSString *)path error:(NSError **)error;
-+ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns error:(NSError **)error;
-+ (BOOL)createEncryptedPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns rows:(NSInteger)rows recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password error:(NSError **)error;
-+ (BOOL)createMultiPagePNGs:(NSString *)source destinationFolder:(NSString *)folder columns:(NSInteger)columns rows:(NSInteger)rows pages:(NSInteger)pages recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password error:(NSError **)error;
++ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns dotPercent:(NSInteger)dotPercent error:(NSError **)error;
++ (BOOL)createEncryptedPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns rows:(NSInteger)rows recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password dotPercent:(NSInteger)dotPercent error:(NSError **)error;
++ (BOOL)createMultiPagePNGs:(NSString *)source destinationFolder:(NSString *)folder columns:(NSInteger)columns rows:(NSInteger)rows pages:(NSInteger)pages recoveryGroupSize:(NSInteger)recoveryGroupSize password:(NSString *)password dotPercent:(NSInteger)dotPercent error:(NSError **)error;
 @end

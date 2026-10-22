@@ -82,6 +82,19 @@ struct ContentView: View {
                                 LabeledContent("Pages selected", value: "\(info["pages"] ?? 0)")
                                 LabeledContent("Page numbers", value: (info["pageNumbers"] as? [Int] ?? []).sorted().map(String.init).joined(separator: ", "))
                                 LabeledContent("Readable blocks", value: "\(info["blocks"] ?? 0)")
+                                if let qualityPages = info["qualityPages"] as? [[String: Any]], !qualityPages.isEmpty {
+                                    Text("Quality Map").font(.headline)
+                                    HStack(spacing: 12) {
+                                        qualityLegendItem("Clean", color: Color(red: 124/255, green: 197/255, blue: 118/255))
+                                        qualityLegendItem("Corrected", color: Color(red: 251/255, green: 175/255, blue: 93/255))
+                                        qualityLegendItem("Heavily corrected", color: Color(red: 242/255, green: 108/255, blue: 79/255))
+                                        qualityLegendItem("Unreadable", color: .black)
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    QualityMapPreview(pages: qualityPages)
+                                        .frame(height: 230)
+                                }
                                 if info["encrypted"] as? Bool == true {
                                     SecureField("Password", text: $restorePassword)
                                         .textFieldStyle(.roundedBorder)
@@ -161,7 +174,7 @@ struct ContentView: View {
 }
 
 
-// Step 11B: create an actual uncompressed PaperBak PNG backup.
+// Create an uncompressed PaperBak PNG backup.
 struct BackupLayoutView: View {
     @State private var source: URL?
     @State private var count = 0
@@ -182,6 +195,7 @@ struct BackupLayoutView: View {
     @State private var marginBottom = 0.25
     @State private var manualColumns = 23
     @State private var manualRows = 30
+    @State private var dotPercent = 100
     @State private var encryptBackup = false
     @State private var backupPassword = ""
     @State private var confirmPassword = ""
@@ -212,7 +226,7 @@ struct BackupLayoutView: View {
         // Restrict image dimensions to the existing encoder's safe pixel budget.
         for x in 3...100 {
             for y in 3...100 {
-                if x * y > 6000 || Double(x * 140 + 4) * Double(y * 140 + 4) > 120_000_000 { continue }
+                if x * y > 6000 || Double(x * 140 + 4) * Double(y * 140 + 4) > 150_000_000 { continue }
                 let n = pageCount(x, y)
                 if n > maximumPages { continue }
                 let size = min(usableW / Double(x), usableH / Double(y))
@@ -258,7 +272,7 @@ struct BackupLayoutView: View {
         for total in required...10000 {
             let pairs = (3...100).filter { x in
                 total % x == 0 && total / x >= 3 && total / x <= 100 &&
-                (x * 140 + 4) * ((total / x) * 140 + 4) <= 120_000_000
+                (x * 140 + 4) * ((total / x) * 140 + 4) <= 150_000_000
             }
             if pairs.count >= 2 { return total }
         }
@@ -270,7 +284,7 @@ struct BackupLayoutView: View {
         guard total > 0 else { return [] }
         return (3...100).filter { x in
             total % x == 0 && total / x >= 3 && total / x <= 100 &&
-            (x * 140 + 4) * ((total / x) * 140 + 4) <= 120_000_000
+            (x * 140 + 4) * ((total / x) * 140 + 4) <= 150_000_000
         }
     }
 
@@ -414,6 +428,15 @@ struct BackupLayoutView: View {
                 }
             }
             if source != nil {
+                Picker("Dot size", selection: $dotPercent) {
+                    ForEach([100, 90, 80, 70, 60, 50], id: \.self) { percent in
+                        Text("\(percent)%").tag(percent)
+                    }
+                }
+                .pickerStyle(.menu)
+                .disabled(busy)
+                Text("Smaller dots may require a higher-quality printer or scan.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Encrypt backup with password", isOn: $encryptBackup).disabled(busy)
                     .onChange(of: encryptBackup) { enabled in
                         if !fourPageMode {
@@ -501,12 +524,13 @@ struct BackupLayoutView: View {
         let x = columns
         let y = encryptBackup && columns > 0 ? encryptedGridCells / columns : 0
         let password = encryptBackup ? backupPassword : ""
+        let selectedDotPercent = dotPercent
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 if password.isEmpty {
-                    try PaperBakBridge.createPNG(source.path, destination: url.path, columns: x)
+                    try PaperBakBridge.createPNG(source.path, destination: url.path, columns: x, dotPercent: selectedDotPercent)
                 } else {
-                    try PaperBakBridge.createEncryptedPNG(source.path, destination: url.path, columns: x, rows: y, recoveryGroupSize: recoveryGroupSize, password: password)
+                    try PaperBakBridge.createEncryptedPNG(source.path, destination: url.path, columns: x, rows: y, recoveryGroupSize: recoveryGroupSize, password: password, dotPercent: selectedDotPercent)
                 }
                 DispatchQueue.main.async { message = "PNG saved: \(url.lastPathComponent)"; busy = false }
             } catch {
@@ -529,9 +553,10 @@ struct BackupLayoutView: View {
         let selectedRecoveryGroupSize = recoveryGroupSize
         let selectedMaximumPages = maximumPages
         let password = encryptBackup ? backupPassword : ""
+        let selectedDotPercent = dotPercent
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                try PaperBakBridge.createMultiPagePNGs(source.path, destinationFolder: folder.path, columns: selectedColumns, rows: selectedRows, pages: selectedMaximumPages, recoveryGroupSize: selectedRecoveryGroupSize, password: password)
+                try PaperBakBridge.createMultiPagePNGs(source.path, destinationFolder: folder.path, columns: selectedColumns, rows: selectedRows, pages: selectedMaximumPages, recoveryGroupSize: selectedRecoveryGroupSize, password: password, dotPercent: selectedDotPercent)
                 DispatchQueue.main.async {
                     message = "PNG pages Generated and Saved in \"\(folder.path)\""
                     busy = false
@@ -670,5 +695,66 @@ private struct LayoutPreview: View {
             }
         }
         .accessibilityLabel("Schematic preview of all \(pages) pages, \(columns) columns and up to \(rows) rows")
+    }
+}
+
+
+private func qualityLegendItem(_ title: String, color: Color) -> some View {
+    HStack(spacing: 4) {
+        Rectangle()
+            .fill(color)
+            .frame(width: 10, height: 10)
+        Text(title)
+    }
+}
+
+// Actual scan results, grouped into the same horizontal page layout as Encode.
+private struct QualityMapPreview: View {
+    let pages: [[String: Any]]
+
+    private func qualityColor(_ value: Int) -> Color {
+        guard value >= 0 else { return .black }
+        // 0 corrections = clean; 1...8 = corrected; 9...16 = heavily corrected.
+        if value == 0 { return Color(red: 124/255, green: 197/255, blue: 118/255) } // #7CC576
+        if value <= 8 { return Color(red: 251/255, green: 175/255, blue: 93/255) } // #FBAF5D
+        return Color(red: 242/255, green: 108/255, blue: 79/255) // #F26C4F
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let height = max(80, geometry.size.height - 28)
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { item in
+                        let page = item.element
+                        let cols = max(1, page["columns"] as? Int ?? 1)
+                        let rows = max(1, page["rows"] as? Int ?? 1)
+                        let cells = page["cells"] as? [Int] ?? []
+                        let width = max(45, height * CGFloat(cols) / CGFloat(rows))
+                        VStack(spacing: 6) {
+                            Canvas { context, size in
+                                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+                                let step = min(size.width / CGFloat(cols), size.height / CGFloat(rows))
+                                for y in 0..<rows {
+                                    for x in 0..<cols {
+                                        let index = y * cols + x
+                                        let quality = index < cells.count ? cells[index] : -1
+                                        let rect = CGRect(x: CGFloat(x)*step, y: CGFloat(y)*step,
+                                                          width: step, height: step)
+                                        context.fill(Path(rect), with: .color(qualityColor(quality)))
+                                        if step >= 4 {
+                                            context.stroke(Path(rect), with: .color(.white.opacity(0.6)), lineWidth: 0.35)
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(width: width, height: height)
+                            Text("Page \(page["page"] as? Int ?? 1) · \(cols)×\(rows)")
+                                .font(.caption2).frame(width: width)
+                        }
+                    }
+                }.padding(.horizontal, 3)
+            }
+        }
     }
 }
