@@ -2,7 +2,7 @@
 
 Native macOS PaperBak-compatible backup encoder and decoder.
 
-- Generate PNG backups using single-page or multi-page layouts.
+- Generate PNG or BMP backups using single-page or multi-page layouts.
 - Choose paper-based layouts or columns-and-rows options.
 - Restore supported PNG and BMP backups.
 - Create and restore password-encrypted backups using the original format.
