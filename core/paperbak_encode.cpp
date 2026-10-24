@@ -23,7 +23,7 @@ Source read(const std::string &path) {
  Source s; s.bytes.assign(std::istreambuf_iterator<char>(f),{});
  if(s.bytes.empty()) throw std::runtime_error("Empty files are not supported yet");
  auto slash=path.find_last_of("/\\"); s.name=path.substr(slash==std::string::npos?0:slash+1);
- if(s.name.size()>63) throw std::runtime_error("Filename is too long for PaperBak: maximum 63 UTF-8 bytes for unencrypted backups (31 bytes for encrypted backups).");
+ if(s.name.size()>63) throw std::runtime_error("Filename is too long for PaperBack: maximum 63 UTF-8 bytes for unencrypted backups (31 bytes for encrypted backups).");
  int n=int((s.bytes.size()+89)/90); s.strings=(n+R-1)/R;
  s.cells=((s.strings+1)*(R+1)+1+9)/10*10; // Pad unused cells with superblocks for usable grid layouts.
  return s;
@@ -71,7 +71,7 @@ EncodedPage encodeFile(const std::string &path,int columns,int dotPercent,bool n
  Source s=read(path);
  if(columns<1 || s.cells%columns) throw std::runtime_error("Columns must divide the total cell count");
  int rows=s.cells/columns;
- if(columns<3 || rows<3) throw std::runtime_error("For the first round-trip test choose a grid with at least 3 columns and 3 rows");
+ if(columns<1 || rows<1) throw std::runtime_error("Columns and Rows must each be at least 1");
  int w=columns*CELL+DOT+PAD*2, h=rows*CELL+DOT+PAD*2;
  if(w>20000 || h>20000 || uint64_t(w)*h>150000000) throw std::runtime_error("Selected layout exceeds the supported image size");
  EncodedPage out{columns,rows,w,h,std::vector<uint8_t>(size_t(w)*h,255)};
@@ -126,7 +126,7 @@ std::vector<EncodedPage> encodePages(const std::string &path,int columns,int ful
  Source s=read(path);
  const bool encrypted = !password.empty();
  if (encrypted && s.name.size()>31)
-  throw std::runtime_error("Filename is too long for an encrypted PaperBak backup: maximum 31 UTF-8 bytes, including the extension. Rename the source file and try again.");
+  throw std::runtime_error("Filename is too long for an encrypted PaperBack backup: maximum 31 UTF-8 bytes, including the extension. Rename the source file and try again.");
  // Encrypt exactly the original AES-aligned length, then place into 90-byte blocks.
  std::uint8_t saltAndIV[32] = {};
  std::uint16_t plaintextCRC = 0;
@@ -140,8 +140,8 @@ std::vector<EncodedPage> encodePages(const std::string &path,int columns,int ful
  }
  const int R=recoveryGroupSize;
  if(R<1 || R>15) throw std::runtime_error("Recovery group size must be between 1 and 15");
- if(columns<3 || fullRows<3 || pageCount<1 || pageCount>1000)
-  throw std::runtime_error("Invalid columns, rows, or page count");
+ if(columns<1 || fullRows<1 || pageCount<1 || pageCount>1000)
+  throw std::runtime_error("Check the grid dimensions and maximum page count.");
  if(uint64_t(columns)*fullRows>100000 || uint64_t(columns*CELL+DOT)*(fullRows*CELL+DOT)>150000000)
   throw std::runtime_error("Page dimensions exceed supported image size");
  const int groups=int(((s.bytes.size()+89)/90+R-1)/R);
@@ -179,7 +179,7 @@ std::vector<EncodedPage> encodePages(const std::string &path,int columns,int ful
  for(int pageIndex=0;pageIndex<actualPages;pageIndex++) {
   const int count=allocation[pageIndex];
   const int rows=pageIndex==actualPages-1
-      ?std::max(3,(count*(R+1)+(R+1)+columns-1)/columns)
+      ?std::max(1,(count*(R+1)+(R+1)+columns-1)/columns)
       :fullRows;
   if(rows>fullRows) throw std::runtime_error("Page rows exceed selected maximum");
   int width=columns*CELL+DOT,height=rows*CELL+DOT;

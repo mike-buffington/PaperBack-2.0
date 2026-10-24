@@ -77,11 +77,11 @@ struct ContentView: View {
                         }
                         if !selectedURLs.isEmpty {
                             if let info {
-                                LabeledContent("Backup file", value: info["name"] as? String ?? "Unknown")
-                                LabeledContent("Original size", value: "\(info["size"] ?? 0) bytes")
-                                LabeledContent("Pages selected", value: "\(info["pages"] ?? 0)")
-                                LabeledContent("Page numbers", value: (info["pageNumbers"] as? [Int] ?? []).sorted().map(String.init).joined(separator: ", "))
-                                LabeledContent("Readable blocks", value: "\(info["blocks"] ?? 0)")
+                                LabeledContent("Backup file:", value: info["name"] as? String ?? "Unknown")
+                                LabeledContent("Original size:", value: "\(info["size"] ?? 0) bytes")
+                                LabeledContent("Pages selected:", value: "\(info["pages"] ?? 0)")
+                                LabeledContent("Page numbers:", value: (info["pageNumbers"] as? [Int] ?? []).sorted().map(String.init).joined(separator: ", "))
+                                LabeledContent("Readable blocks:", value: "\(info["blocks"] ?? 0)")
                                 if let qualityPages = info["qualityPages"] as? [[String: Any]], !qualityPages.isEmpty {
                                     Text("Quality Map").font(.headline)
                                     HStack(spacing: 12) {
@@ -174,7 +174,7 @@ struct ContentView: View {
 }
 
 
-// Create a PaperBak PNG backup using the selected compression method.
+// Create a PaperBak image backup using the selected compression method.
 struct BackupLayoutView: View {
     @State private var source: URL?
     @State private var count = 0
@@ -197,6 +197,7 @@ struct BackupLayoutView: View {
     @State private var manualColumns = 23
     @State private var manualRows = 30
     @State private var dotPercent = 100
+    @State private var outputFormat = "png"
     @State private var compressionMethod = "original"
     @State private var lzmaLevel = 5
     @State private var encryptBackup = false
@@ -217,6 +218,7 @@ struct BackupLayoutView: View {
         }
         if layoutMode == "grid" {
             let x = manualColumns, y = manualRows
+            guard (2...100).contains(x), (2...100).contains(y) else { return nil }
             let n = pageCount(x, y)
             return n <= maximumPages ? (x, y, n, 0) : nil
         }
@@ -227,8 +229,8 @@ struct BackupLayoutView: View {
         var best: (x: Int, y: Int, pages: Int, blockSize: Double)?
         // A cell is square. Maximize its physical size, with X favored on ties.
         // Restrict image dimensions to the existing encoder's safe pixel budget.
-        for x in 3...100 {
-            for y in 3...100 {
+        for x in 2...100 {
+            for y in 2...100 {
                 if x * y > 6000 || Double(x * 140 + 4) * Double(y * 140 + 4) > 150_000_000 { continue }
                 let n = pageCount(x, y)
                 if n > maximumPages { continue }
@@ -321,14 +323,15 @@ struct BackupLayoutView: View {
     private var choices: [Int] {
         guard count > 0 else { return [] }
         if encryptBackup { return encryptedChoices }
-        return (1...count).filter { count % $0 == 0 }
+        guard count >= 3 else { return [] }
+        return (3...count).filter { count % $0 == 0 && count / $0 >= 3 }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-            Text("Encode PaperBack PNG Backup").font(.title2.bold())
-            Text("Select a file, choose a grid, and save a PNG backup.")
+            Text("Encode PaperBack Backup").font(.title2.bold())
+            Text("Select a file, choose a grid, and save a PNG or BMP backup.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Button("Choose File…") { chooseFile() }.disabled(busy)
@@ -352,14 +355,14 @@ struct BackupLayoutView: View {
                 .pickerStyle(.menu)
                 .disabled(busy || choices.isEmpty)
                 if encryptBackup && choices.isEmpty {
-                    Text("This file is too large for a single encrypted PNG. Enable Multi-page PNG to split it into pages.")
+                    Text("This file is too large for a single encrypted image. Enable Multi-page backup to split it into pages.")
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             if fourPageMode {
                 Picker("Layout mode", selection: $layoutMode) {
-                    Text("Paper Layout (automatic)").tag("paper")
+                    Text("Paper Layout (Automatic)").tag("paper")
                     Text("Columns and Rows (Manual)").tag("grid")
                 }.pickerStyle(.segmented).disabled(busy)
                 HStack(spacing: 10) {
@@ -400,16 +403,30 @@ struct BackupLayoutView: View {
                         LabeledContent("Top margin") { TextField("Top", value: $marginTop, format: .number).frame(width: 75) }
                         LabeledContent("Bottom margin") { TextField("Bottom", value: $marginBottom, format: .number).frame(width: 75) }
                     }
-                    Text("All dimensions use the selected units. PNG files remain borderless; margins determine the usable paper area.")
+                    Text("All dimensions use the selected units. Backup images remain borderless; margins determine the usable paper area.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {
-                    NumberStepperField(label: "Columns", value: $manualColumns, range: 3...100, disabled: busy)
-                    NumberStepperField(label: "Rows", value: $manualRows, range: 3...100, disabled: busy)
+                    NumberStepperField(label: "Columns", value: $manualColumns, range: 2...100, disabled: busy)
+                    NumberStepperField(label: "Rows", value: $manualRows, range: 2...100, disabled: busy)
                 }
                 if source != nil {
                     if let g = proposedGrid {
-                        Text("Calculated layout: \(g.x) × \(g.y), \(g.pages) page(s)")
+                        Text("Calculated layout: \(g.x) × \(g.y), \(g.pages) \(g.pages == 1 ? "page" : "pages")")
                             .font(.headline)
+                        // A large manual grid can still contain only one or two
+                        // populated rows (or columns) for a very small file.
+                        // Warn based on occupied cells as well as configured size.
+                        let dataBlocks = (Int(encodedSourceBytes) + 89) / 90
+                        let groupCount = (dataBlocks + recoveryGroupSize - 1) / recoveryGroupSize
+                        let occupiedCells = min(g.x * g.y, (groupCount + 1) * (recoveryGroupSize + 1))
+                        let occupiedColumns = min(g.x, occupiedCells)
+                        let occupiedRows = (occupiedCells + g.x - 1) / g.x
+                        if g.x <= 2 || g.y <= 2 || occupiedColumns <= 2 || occupiedRows <= 2 {
+                            Text("Warning: This backup may contain only 1 or 2 populated columns or rows. The original Windows PaperBack decoder may not recognize narrow grids. For reliable compatibility, use at least 3 populated columns and rows.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if layoutMode == "paper" {
                             Text(String(format: "Square size on paper: %.2f mm (%.3f in)", g.blockSize, g.blockSize / 25.4))
                                 .foregroundStyle(.secondary)
@@ -440,7 +457,7 @@ struct BackupLayoutView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Picker("Compression", selection: $compressionMethod) {
                     Text("None (Uncompressed)").tag("none")
-                    Text("Original PaperBak (Windows compatible)").tag("original")
+                    Text("Original PaperBack (Windows compatible)").tag("original")
                     Text("7-Zip / LZMA2").tag("lzma2")
                 }
                 .pickerStyle(.menu)
@@ -455,7 +472,7 @@ struct BackupLayoutView: View {
                     .pickerStyle(.menu)
                     .disabled(busy)
                     .onChange(of: lzmaLevel) { _ in refreshCompressionEstimate() }
-                    Text("LZMA2 backups require PaperBack for macOS to restore; original Windows PaperBak cannot read them.")
+                    Text("LZMA2 backups require PaperBack for macOS to restore; original Windows PaperBack cannot read them.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Toggle("Encrypt backup with password", isOn: $encryptBackup).disabled(busy)
@@ -472,7 +489,11 @@ struct BackupLayoutView: View {
                         Text("Passwords do not match").foregroundStyle(.orange)
                     }
                 }
-                Toggle("Multi-page PNG", isOn: $fourPageMode).disabled(busy)
+                Picker("Image format", selection: $outputFormat) {
+                    Text("PNG").tag("png")
+                    Text("BMP (Windows, 8-bit grayscale)").tag("bmp")
+                }.pickerStyle(.menu).disabled(busy)
+                Toggle("Multi-page backup", isOn: $fourPageMode).disabled(busy)
                 if fourPageMode { Text("Full pages use the same grid; the last page may be shorter.") }
                 Text("Each square is a complete 32 × 32 encoded PaperBack block. Extreme layouts may not be readable by the original decoder.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -483,7 +504,7 @@ struct BackupLayoutView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 8) {
-                Button("Generate PNG…") { generate() }
+                Button("Generate Backup…") { generate() }
                     .buttonStyle(.plain)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.white)
@@ -507,7 +528,7 @@ struct BackupLayoutView: View {
     private func chooseUnencryptedGrid() {
         let n = count
         guard n > 0 else { columns = 0; return }
-        let options = (1...n).filter { n % $0 == 0 && $0 >= 3 && n / $0 >= 3 }
+        let options = n >= 3 ? (3...n).filter { n % $0 == 0 && n / $0 >= 3 } : []
         columns = options.min { a, b in
             abs(a - n / a) < abs(b - n / b)
         } ?? 0
@@ -562,12 +583,12 @@ struct BackupLayoutView: View {
         guard let source else { return }
         if fourPageMode { generateFourPages(source); return }
         if encryptBackup && columns == 0 {
-            message = "No single-page encrypted grid fits this file. Enable Multi-page PNG."
+            message = "No single-page encrypted grid fits this file. Enable Multi-page backup."
             return
         }
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.png]
-        panel.nameFieldStringValue = source.lastPathComponent + ".png"
+        panel.allowedContentTypes = outputFormat == "bmp" ? [.bmp] : [.png]
+        panel.nameFieldStringValue = source.lastPathComponent + "." + outputFormat
         guard panel.runModal() == .OK, let url = panel.url else { return }
         busy = true
         message = "Encoding PaperBack blocks…"
@@ -577,14 +598,15 @@ struct BackupLayoutView: View {
         let selectedDotPercent = dotPercent
         let selectedCompression = compressionMethod
         let selectedLzmaLevel = lzmaLevel
+        let selectedFormat = outputFormat
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 if password.isEmpty {
-                    try PaperBakBridge.createPNG(source.path, destination: url.path, columns: x, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel)
+                    try PaperBakBridge.createPNG(source.path, destination: url.path, columns: x, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel, imageFormat: selectedFormat)
                 } else {
-                    try PaperBakBridge.createEncryptedPNG(source.path, destination: url.path, columns: x, rows: y, recoveryGroupSize: recoveryGroupSize, password: password, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel)
+                    try PaperBakBridge.createEncryptedPNG(source.path, destination: url.path, columns: x, rows: y, recoveryGroupSize: recoveryGroupSize, password: password, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel, imageFormat: selectedFormat)
                 }
-                DispatchQueue.main.async { message = "PNG saved: \(url.lastPathComponent)"; busy = false }
+                DispatchQueue.main.async { message = "Backup saved: \(url.lastPathComponent)"; busy = false }
             } catch {
                 DispatchQueue.main.async { message = error.localizedDescription; busy = false }
             }
@@ -598,7 +620,7 @@ struct BackupLayoutView: View {
         panel.prompt = "Choose Output Folder"
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         busy = true
-        message = "Generating PaperBack PNG pages…"
+        message = "Generating PaperBack image pages…"
         guard let grid = proposedGrid else { message = "No valid grid for these settings."; return }
         let selectedColumns = grid.x
         let selectedRows = grid.y
@@ -608,11 +630,12 @@ struct BackupLayoutView: View {
         let selectedDotPercent = dotPercent
         let selectedCompression = compressionMethod
         let selectedLzmaLevel = lzmaLevel
+        let selectedFormat = outputFormat
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                try PaperBakBridge.createMultiPagePNGs(source.path, destinationFolder: folder.path, columns: selectedColumns, rows: selectedRows, pages: selectedMaximumPages, recoveryGroupSize: selectedRecoveryGroupSize, password: password, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel)
+                try PaperBakBridge.createMultiPagePNGs(source.path, destinationFolder: folder.path, columns: selectedColumns, rows: selectedRows, pages: selectedMaximumPages, recoveryGroupSize: selectedRecoveryGroupSize, password: password, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel, imageFormat: selectedFormat)
                 DispatchQueue.main.async {
-                    message = "PNG pages Generated and Saved in \"\(folder.path)\""
+                    message = "Backup pages saved in \"\(folder.path)\""
                     busy = false
                 }
             } catch {
