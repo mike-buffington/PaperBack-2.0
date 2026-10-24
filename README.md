@@ -40,13 +40,14 @@ This project incorporates code derived from the original PaperBak implementation
 
 ## Screenshots and generated files
 
-<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 36 24 PM" src="https://github.com/user-attachments/assets/296208ac-dcef-4cb4-8dc5-e65e6bb1917e" />
-<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 37 01 PM" src="https://github.com/user-attachments/assets/376549c5-fc99-4611-9ddc-3a98cb32b189" />
-<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 38 17 PM" src="https://github.com/user-attachments/assets/699079ed-39fe-477a-a686-af32bfb9638a" />
-<img width="1348" height="1196" alt="Screenshot 2026-10-22 at 2 39 23 PM" src="https://github.com/user-attachments/assets/4c718f44-8974-4b71-8823-01ddc71fa261" />
+<img width="946" height="1225" alt="Screenshot 2026-10-24 at 12 40 04 PM" src="https://github.com/user-attachments/assets/5ee72235-62dc-4c23-8c08-c7ebdff07514" />
+<img width="946" height="1225" alt="Screenshot 2026-10-24 at 12 40 50 PM" src="https://github.com/user-attachments/assets/960dcb1d-ffa0-4bc8-9964-9d0f7136d262" />
+<img width="946" height="1225" alt="Screenshot 2026-10-24 at 12 41 18 PM" src="https://github.com/user-attachments/assets/9dd602e0-0b4b-4735-977e-702724db8db6" />
+<img width="946" height="1225" alt="Screenshot 2026-10-24 at 12 42 32 PM" src="https://github.com/user-attachments/assets/ba8e43c7-0d61-4c28-b1ef-50754db786f7" />
 
 (This is the app encoded, and can be decoded with the original Windows application -- no compression, no password)
-<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0001" src="https://github.com/user-attachments/assets/bc68f0b0-5f70-4833-a981-6d8069cd2a01" />
-<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0002" src="https://github.com/user-attachments/assets/9bf73d51-3cf2-4a40-8a2e-f4ce2dbe058e" />
-<img width="6164" height="7844" alt="PaperBack-2 0-macOS_0003" src="https://github.com/user-attachments/assets/5d36e861-ea09-45ad-8dda-4cf6e266aa5c" />
+
+<img width="5184" height="6864" alt="PaperBack-2 0-macOS_0001" src="https://github.com/user-attachments/assets/03b19bb3-fcbd-4119-a579-51b4abb13fd6" />
+<img width="5184" height="6864" alt="PaperBack-2 0-macOS_0002" src="https://github.com/user-attachments/assets/1d9e4f87-3cb7-4a1f-b283-22d5dc089c0d" />
+<img width="5184" height="6584" alt="PaperBack-2 0-macOS_0003" src="https://github.com/user-attachments/assets/b7448e6d-71b0-4f29-bb4e-f47e49a6d652" />
 
