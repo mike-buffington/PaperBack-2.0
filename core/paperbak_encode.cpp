@@ -15,9 +15,9 @@ extern ushort Crc16(uchar*,int);
 extern void Encode8(uchar*,uchar*,int);
 namespace paperbak {
 namespace {
-constexpr int R=10, DOT=4, CELL=35*DOT, PAD=25;
+constexpr int DOT=4, CELL=35*DOT, PAD=25;
 struct Source { std::vector<uint8_t> bytes; std::string name; int strings,cells; };
-Source read(const std::string &path) {
+Source read(const std::string &path,int R) {
  std::ifstream f(path,std::ios::binary);
  if(!f) throw std::runtime_error("Cannot open input file");
  Source s; s.bytes.assign(std::istreambuf_iterator<char>(f),{});
@@ -65,10 +65,15 @@ void line(std::vector<uint8_t>&img,int w,int h,int x,int y,int len,bool horizont
  }
 }
 }
-int requiredCells(const std::string &path){return read(path).cells;}
-EncodedPage encodeFile(const std::string &path,int columns,int dotPercent,bool nativeCompressed,std::uint32_t originalSize) {
+int requiredCells(const std::string &path,int recoveryGroupSize){
+ if(recoveryGroupSize<1 || recoveryGroupSize>15) throw std::runtime_error("Recovery group size must be between 1 and 15");
+ return read(path,recoveryGroupSize).cells;
+}
+EncodedPage encodeFile(const std::string &path,int columns,int dotPercent,bool nativeCompressed,std::uint32_t originalSize,int recoveryGroupSize) {
+ const int R=recoveryGroupSize;
+ if(R<1 || R>15) throw std::runtime_error("Recovery group size must be between 1 and 15");
  if(dotPercent<50 || dotPercent>100) throw std::runtime_error("Dot size must be between 50 and 100 percent");
- Source s=read(path);
+ Source s=read(path,R);
  if(columns<1 || s.cells%columns) throw std::runtime_error("Columns must divide the total cell count");
  int rows=s.cells/columns;
  if(columns<1 || rows<1) throw std::runtime_error("Columns and Rows must each be at least 1");
@@ -123,7 +128,7 @@ EncodedPage encodeFile(const std::string &path,int columns,int dotPercent,bool n
 
 std::vector<EncodedPage> encodePages(const std::string &path,int columns,int fullRows,int pageCount,int recoveryGroupSize,const std::string &password,int dotPercent,bool nativeCompressed,std::uint32_t originalSize) {
  if(dotPercent<50 || dotPercent>100) throw std::runtime_error("Dot size must be between 50 and 100 percent");
- Source s=read(path);
+ Source s=read(path,recoveryGroupSize);
  const bool encrypted = !password.empty();
  if (encrypted && s.name.size()>31)
   throw std::runtime_error("Filename is too long for an encrypted PaperBack backup: maximum 31 UTF-8 bytes, including the extension. Rename the source file and try again.");

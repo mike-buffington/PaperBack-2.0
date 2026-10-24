@@ -81,7 +81,9 @@ struct ContentView: View {
                                 LabeledContent("Original size:", value: "\(info["size"] ?? 0) bytes")
                                 LabeledContent("Pages selected:", value: "\(info["pages"] ?? 0)")
                                 LabeledContent("Page numbers:", value: (info["pageNumbers"] as? [Int] ?? []).sorted().map(String.init).joined(separator: ", "))
+                                LabeledContent("Total blocks:", value: "\(info["totalBlocks"] ?? 0)")
                                 LabeledContent("Readable blocks:", value: "\(info["blocks"] ?? 0)")
+                                LabeledContent("Unreadable blocks:", value: "\(info["unreadableBlocks"] ?? 0)")
                                 if let qualityPages = info["qualityPages"] as? [[String: Any]], !qualityPages.isEmpty {
                                     Text("Quality Map").font(.headline)
                                     HStack(spacing: 12) {
@@ -184,6 +186,7 @@ struct BackupLayoutView: View {
     @State private var busy = false
     @State private var fourPageMode = false
     @State private var recoveryGroupSize = 2
+    @State private var singleRecoveryGroupSize = 10
     @State private var maximumPages = 4
     @State private var layoutMode = "paper"
     @State private var units = "in"
@@ -256,7 +259,7 @@ struct BackupLayoutView: View {
         guard fileBytes > 0 else { return 0 }
         let padded = ((fileBytes - 1) / 16 + 1) * 16
         let dataBlocks = (padded - 1) / 90 + 1
-        let groupSize = Int64(recoveryGroupSize)
+        let groupSize = Int64(singleRecoveryGroupSize)
         let groups = (dataBlocks - 1) / groupSize + 1
         // No single-page grid can contain more than 100 × 100 cells.
         // Return a sentinel rather than overflowing the multiplication.
@@ -359,6 +362,12 @@ struct BackupLayoutView: View {
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+            if source != nil && !fourPageMode {
+                Picker("Recovery group size", selection: $singleRecoveryGroupSize) {
+                    ForEach(1...15, id: \.self) { Text("\($0)").tag($0) }
+                }.disabled(busy)
+                .onChange(of: singleRecoveryGroupSize) { _ in refreshCompressionEstimate() }
             }
             if fourPageMode {
                 Picker("Layout mode", selection: $layoutMode) {
@@ -540,7 +549,7 @@ struct BackupLayoutView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             var bridgeError: NSError?
-            let n = PaperBakBridge.requiredCells(url.path, error: &bridgeError)
+            let n = PaperBakBridge.requiredCells(url.path, recoveryGroupSize: singleRecoveryGroupSize, error: &bridgeError)
             if let bridgeError { throw bridgeError }
             guard n > 0 else { throw NSError(domain: "PaperBak", code: 1) }
             source = url
@@ -557,16 +566,17 @@ struct BackupLayoutView: View {
         message = "Calculating compressed backup size…"
         let method = compressionMethod
         let level = lzmaLevel
+        let singleGroup = singleRecoveryGroupSize
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let result = try PaperBakBridge.sourceLayout(source.path, compression: method, lzmaLevel: level)
+                let result = try PaperBakBridge.sourceLayout(source.path, compression: method, lzmaLevel: level, recoveryGroupSize: singleGroup)
                 guard let cells = result["cells"]?.intValue,
                       let bytes = result["bytes"] else {
                     throw NSError(domain: "PaperBack", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unable to calculate compressed layout"])
                 }
                 DispatchQueue.main.async {
                     // Discard stale results when the user changes compression during processing.
-                    guard self.source == source && self.compressionMethod == method && self.lzmaLevel == level else { return }
+                    guard self.source == source && self.compressionMethod == method && self.lzmaLevel == level && self.singleRecoveryGroupSize == singleGroup else { return }
                     count = cells
                     encodedSourceBytes = bytes.int64Value
                     if encryptBackup && !fourPageMode { chooseEncryptedGrid() }
@@ -602,9 +612,9 @@ struct BackupLayoutView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 if password.isEmpty {
-                    try PaperBakBridge.createPNG(source.path, destination: url.path, columns: x, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel, imageFormat: selectedFormat)
+                    try PaperBakBridge.createPNG(source.path, destination: url.path, columns: x, recoveryGroupSize: singleRecoveryGroupSize, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel, imageFormat: selectedFormat)
                 } else {
-                    try PaperBakBridge.createEncryptedPNG(source.path, destination: url.path, columns: x, rows: y, recoveryGroupSize: recoveryGroupSize, password: password, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel, imageFormat: selectedFormat)
+                    try PaperBakBridge.createEncryptedPNG(source.path, destination: url.path, columns: x, rows: y, recoveryGroupSize: singleRecoveryGroupSize, password: password, dotPercent: selectedDotPercent, compression: selectedCompression, lzmaLevel: selectedLzmaLevel, imageFormat: selectedFormat)
                 }
                 DispatchQueue.main.async { message = "Backup saved: \(url.lastPathComponent)"; busy = false }
             } catch {

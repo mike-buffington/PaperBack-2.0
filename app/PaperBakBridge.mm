@@ -270,10 +270,21 @@ NSError *errorFor(const std::exception &e) {
                                        @"rows": @(d.gridRows), @"cells": cells,
                                        @"bad": @(d.badBlocks), @"good": @(d.goodBlocks+d.superBlocks) }];
         }
+        // Count every grid cell represented in the quality map. Superblocks are
+        // readable blocks too; any cell without a decoded block is unreadable.
+        long long totalBlocks = 0;
+        long long readableBlocks = 0;
+        for (const auto &page : s.pages) {
+            const auto &d = page.decoded;
+            totalBlocks += static_cast<long long>(d.gridColumns) * d.gridRows;
+            readableBlocks += d.goodBlocks + d.superBlocks;
+        }
+        const long long unreadableBlocks = std::max(0LL, totalBlocks - readableBlocks);
         return @{ @"name": [NSString stringWithUTF8String:s.name.c_str()],
                   @"size": @(s.metadata.originalSize), @"storedSize": @(s.metadata.dataSize),
                   @"pages": @(s.pages.size()), @"pageNumbers": numbers,
-                  @"blocks": @(s.readableBlocks), @"qualityPages": qualityPages,
+                  @"totalBlocks": @(totalBlocks), @"blocks": @(readableBlocks),
+                  @"unreadableBlocks": @(unreadableBlocks), @"qualityPages": qualityPages,
                   @"encrypted": @((s.metadata.mode & paperbak::kEncrypted)!=0) };
     } catch (const std::exception &e) { if(error) *error=errorFor(e); return nil; }
 }
@@ -282,7 +293,7 @@ NSError *errorFor(const std::exception &e) {
     catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
 }
 
-+ (NSDictionary<NSString *, id> *)inspect:(NSString *)path error:(NSError **)error {
++ (NSDictionary<NSString *, id> *)inspect:(NSString *)path recoveryGroupSize:(NSInteger)recoveryGroupSize error:(NSError **)error {
     try {
         auto s=scan(std::string(path.fileSystemRepresentation));
         return @{ @"name": [NSString stringWithUTF8String:s.name.c_str()],
@@ -295,16 +306,16 @@ NSError *errorFor(const std::exception &e) {
     try { ::restore(std::string(source.fileSystemRepresentation),std::string(destination.fileSystemRepresentation),std::string(password.UTF8String ?: "")); return YES; }
     catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
 }
-+ (NSDictionary<NSString *, NSNumber *> *)sourceLayout:(NSString *)source compression:(NSString *)compression lzmaLevel:(NSInteger)lzmaLevel error:(NSError **)error {
++ (NSDictionary<NSString *, NSNumber *> *)sourceLayout:(NSString *)source compression:(NSString *)compression lzmaLevel:(NSInteger)lzmaLevel recoveryGroupSize:(NSInteger)recoveryGroupSize error:(NSError **)error {
     try {
         PreparedInput prepared(std::string(source.fileSystemRepresentation),std::string(compression.UTF8String ?: "original"),int(lzmaLevel));
         auto bytes=std::filesystem::file_size(prepared.path);
-        int cells=paperbak::requiredCells(prepared.path);
+        int cells=paperbak::requiredCells(prepared.path,int(recoveryGroupSize));
         return @{ @"bytes": @(bytes), @"cells": @(cells) };
     } catch(const std::exception &e) { if(error) *error=errorFor(e); return nil; }
 }
-+ (NSInteger)requiredCells:(NSString *)path error:(NSError **)error {
-    try { return paperbak::requiredCells(std::string(path.fileSystemRepresentation)); }
++ (NSInteger)requiredCells:(NSString *)path recoveryGroupSize:(NSInteger)recoveryGroupSize error:(NSError **)error {
+    try { return paperbak::requiredCells(std::string(path.fileSystemRepresentation),int(recoveryGroupSize)); }
     catch(const std::exception &e) { if(error) *error=errorFor(e); return -1; }
 }
 // Write a binary black/white PaperBak page. BMP uses an explicit Windows
@@ -361,10 +372,10 @@ static void savePaperBakImage(const paperbak::EncodedPage &page, NSString *desti
     } else throw std::runtime_error("Unsupported image format");
 }
 
-+ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns dotPercent:(NSInteger)dotPercent compression:(NSString *)compression lzmaLevel:(NSInteger)lzmaLevel imageFormat:(NSString *)imageFormat error:(NSError **)error {
++ (BOOL)createPNG:(NSString *)source destination:(NSString *)destination columns:(NSInteger)columns recoveryGroupSize:(NSInteger)recoveryGroupSize dotPercent:(NSInteger)dotPercent compression:(NSString *)compression lzmaLevel:(NSInteger)lzmaLevel imageFormat:(NSString *)imageFormat error:(NSError **)error {
     try {
         PreparedInput prepared(std::string(source.fileSystemRepresentation),std::string(compression.UTF8String ?: "original"),int(lzmaLevel));
-        auto page=paperbak::encodeFile(prepared.path,int(columns),int(dotPercent),prepared.nativeCompressed,prepared.originalSize);
+        auto page=paperbak::encodeFile(prepared.path,int(columns),int(dotPercent),prepared.nativeCompressed,prepared.originalSize,int(recoveryGroupSize));
         savePaperBakImage(page, destination, imageFormat);
         return YES;
     } catch(const std::exception &e) { if(error) *error=errorFor(e); return NO; }
