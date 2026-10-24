@@ -1,14 +1,14 @@
 # PaperBack 2.0 for macOS
-PaperBack is a native macOS application for encoding files as printable PaperBak backup images and restoring files from PNG or BMP backup images. Uses the source code from Oleh Yuschuk's **PaperBack** (https://www.ollydbg.de/Paperbak/index.html).
+PaperBack is a native macOS application for encoding files as printable PaperBack backup images and restoring files from PNG or BMP backup images. Uses the source code from Oleh Yuschuk's **PaperBack** (https://www.ollydbg.de/Paperbak/index.html).
 
 ## New Features:
 - Improved interface focusing on generating backups with ease and with more user controls
-- Encode files as PaperBak-compatible PNG backup images or original format BMP images
+- Encode files as PaperBack-compatible PNG backup images or original format BMP images
 - Decode PNG and BMP backup images
 - Single-page and multi-page backup layout options
 - Paper size-based or manually selected columns and rows
 - Recovery-block configuration
-- Password-protected backups compatible with the original PaperBak encryption format
+- Password-protected backups compatible with the original PaperBack encryption format
 - Added 7zip compression
 
 ## Requirements: macOS 26 or later
@@ -30,13 +30,13 @@ In Xcode, choose the **PaperBack** scheme, destination **My Mac**, then **Produc
 
 ## Compatibility and security
 
-The app is intended to support the original PaperBak format. Test backup restoration before relying on printed or stored backup images. Original-format encryption is for compatibility and should not be represented as a modern independently audited security design.
+The app is intended to support the original PaperBack format. Test backup restoration before relying on printed or stored backup images. Original-format encryption is for compatibility and should not be represented as a modern independently audited security design.
 
 A locally built application may be unsigned. Downloaded unsigned applications may prompt macOS Gatekeeper warnings. Signing and notarization are recommended for distribution.
 
 ## Attribution and licensing
 
-This project incorporates code derived from the original PaperBak implementation and includes an ECC implementation bearing a GPL notice. **Before redistributing the source or application beyond your own use, review the original component licenses and their requirements.** No new blanket license is asserted for third-party source code in this package.
+This project incorporates code derived from the original PaperBack implementation and includes an ECC implementation bearing a GPL notice. **Before redistributing the source or application beyond your own use, review the original component licenses and their requirements.** No new blanket license is asserted for third-party source code in this package.
 
 ## Screenshots and generated files
 

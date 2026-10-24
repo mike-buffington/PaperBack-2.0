@@ -1,6 +1,7 @@
 # PaperBack 2.0 for macOS
 
-Native macOS PaperBak-compatible backup encoder and decoder.
+Native macOS PaperBack-compatible backup encoder and decoder. Uses the source code from Oleh Yuschuk's **PaperBack** (https://www.ollydbg.de/Paperbak/index.html).
+
 
 - Generate PNG or BMP backups using single-page or multi-page layouts.
 - Choose paper-based layouts or columns-and-rows options.
