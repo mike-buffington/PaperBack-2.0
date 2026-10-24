@@ -40,8 +40,8 @@ This project incorporates code derived from the original PaperBack implementatio
 
 ## Screenshots and generated files
 
-Generate a grid of PaperBack blocks from the Column x Rows menu. Options for dot size, compression (with 7zip option), encryption, and PNG or BMP images:
-<img width="946" height="1225" alt="Screenshot 2026-10-24 at 12 40 04 PM" src="https://github.com/user-attachments/assets/5ee72235-62dc-4c23-8c08-c7ebdff07514" />
+Generate a grid of PaperBack blocks from the Column x Rows menu. Options for recovery group size, dot size, compression (with 7zip option), encryption, and PNG or BMP images:
+<img width="946" height="1225" alt="Screenshot 2026-10-24 at 1 45 38 PM" src="https://github.com/user-attachments/assets/5c0cca5f-c354-46b8-8434-e2cd08da8fd4" />
 <br>
 <br>
 <br>
@@ -56,12 +56,11 @@ Options to customize the columns and rows for multiple pages:
 <br>
 <br>
 Decoding can select multiple pages at once. Metadata in the files is shown and quality maps are generated:
-<img width="946" height="1225" alt="Screenshot 2026-10-24 at 12 42 32 PM" src="https://github.com/user-attachments/assets/ba8e43c7-0d61-4c28-b1ef-50754db786f7" />
+<img width="946" height="1225" alt="Screenshot 2026-10-24 at 1 45 21 PM" src="https://github.com/user-attachments/assets/b3801883-b447-4ce8-8c58-aef4eeb45da9" />
 <br>
 <br>
 <br>
 This is the app encoded, and can be decoded with the original Windows application. There is no compression and no password, but the images are PNG files. Convert to BMP for the Windows application.
-<img width="5184" height="6864" alt="PaperBack-2 0-macOS_0001" src="https://github.com/user-attachments/assets/03b19bb3-fcbd-4119-a579-51b4abb13fd6" />
-<img width="5184" height="6864" alt="PaperBack-2 0-macOS_0002" src="https://github.com/user-attachments/assets/1d9e4f87-3cb7-4a1f-b283-22d5dc089c0d" />
-<img width="5184" height="6584" alt="PaperBack-2 0-macOS_0003" src="https://github.com/user-attachments/assets/b7448e6d-71b0-4f29-bb4e-f47e49a6d652" />
-
+<img width="5184" height="6864" alt="PaperBack-2 0-macOS_0001" src="https://github.com/user-attachments/assets/1ce9177b-414f-42ba-9389-a8d92fd8c71e" />
+<img width="5184" height="6864" alt="PaperBack-2 0-macOS_0002" src="https://github.com/user-attachments/assets/1fde2a37-0675-4d12-893a-75e59f9d6457" />
+<img width="5184" height="6724" alt="PaperBack-2 0-macOS_0003" src="https://github.com/user-attachments/assets/ac9d65f2-8a72-4980-9969-c4f0e3df2ede" />
