@@ -7,7 +7,7 @@ PaperBack is a native macOS application for encoding files as printable PaperBac
 - Decode PNG and BMP backup images
 - Single-page and multi-page backup layout options
 - Paper size-based or manually selected columns and rows
-- Recovery-block configuration
+- Select multiple files at once for decoding
 - Password-protected backups compatible with the original PaperBack encryption format
 - Added 7zip compression
 
