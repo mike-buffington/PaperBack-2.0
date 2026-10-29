@@ -48,7 +48,7 @@ struct PreparedInput {
             unsigned int capacity=unsigned(bytes.size()+bytes.size()/100+601);
             compressed.resize(capacity);
             const int rc=BZ2_bzBuffToBuffCompress(reinterpret_cast<char*>(compressed.data()),&capacity,
-                reinterpret_cast<char*>(bytes.data()),unsigned(bytes.size()),9,0,30);
+                reinterpret_cast<char*>(bytes.data()),unsigned(bytes.size()),level,0,30);
             if(rc!=BZ_OK) throw std::runtime_error("Native BZip2 compression failed");
             compressed.resize(capacity);
             nativeCompressed=true;

@@ -17,6 +17,21 @@ namespace paperbak {
 namespace {
 constexpr int DOT=4, CELL=35*DOT, PAD=25;
 struct Source { std::vector<uint8_t> bytes; std::string name; int strings,cells; };
+// The Windows encrypted header reserves name[32..63] for the salt and IV.
+// Shorten the stored name without changing the source filename or file contents.
+std::string utf8Prefix(const std::string &value, std::size_t limit) {
+ std::size_t n=std::min(limit,value.size());
+ while(n>0 && n<value.size() && (static_cast<unsigned char>(value[n])&0xC0)==0x80) --n;
+ return value.substr(0,n);
+}
+std::string encryptedStoredName(const std::string &name) {
+ constexpr std::size_t maxName=31;
+ if(name.size()<=maxName) return name;
+ const auto dot=name.find_last_of('.');
+ const std::string ext=(dot!=std::string::npos && dot>0) ? name.substr(dot) : std::string();
+ if(ext.size()>=maxName) return utf8Prefix(name,maxName);
+ return utf8Prefix(name,maxName-ext.size())+ext;
+}
 Source read(const std::string &path,int R) {
  std::ifstream f(path,std::ios::binary);
  if(!f) throw std::runtime_error("Cannot open input file");
@@ -74,8 +89,8 @@ EncodedPage encodeFile(const std::string &path,int columns,int dotPercent,bool n
  if(R<1 || R>15) throw std::runtime_error("Recovery group size must be between 1 and 15");
  if(dotPercent<50 || dotPercent>100) throw std::runtime_error("Dot size must be between 50 and 100 percent");
  Source s=read(path,R);
- if(columns<1 || s.cells%columns) throw std::runtime_error("Columns must divide the total cell count");
- int rows=s.cells/columns;
+ if(columns<1) throw std::runtime_error("Columns must be positive");
+ int rows=(s.cells+columns-1)/columns; // Spare grid cells are filled with superblocks.
  if(columns<1 || rows<1) throw std::runtime_error("Columns and Rows must each be at least 1");
  int w=columns*CELL+DOT+PAD*2, h=rows*CELL+DOT+PAD*2;
  if(w>20000 || h>20000 || uint64_t(w)*h>150000000) throw std::runtime_error("Selected layout exceeds the supported image size");
@@ -130,8 +145,7 @@ std::vector<EncodedPage> encodePages(const std::string &path,int columns,int ful
  if(dotPercent<50 || dotPercent>100) throw std::runtime_error("Dot size must be between 50 and 100 percent");
  Source s=read(path,recoveryGroupSize);
  const bool encrypted = !password.empty();
- if (encrypted && s.name.size()>31)
-  throw std::runtime_error("Filename is too long for an encrypted PaperBack backup: maximum 31 UTF-8 bytes, including the extension. Rename the source file and try again.");
+ if (encrypted) s.name=encryptedStoredName(s.name);
  // Encrypt exactly the original AES-aligned length, then place into 90-byte blocks.
  std::uint8_t saltAndIV[32] = {};
  std::uint16_t plaintextCRC = 0;
